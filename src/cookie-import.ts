@@ -299,12 +299,10 @@ function getBrowserMatch(browser: BrowserInfo, profile: string): BrowserMatch {
 
 // ─── Internal: Input Sanitization ───────────────────────────────
 
-export function sanitizeBrowserName(name: string): string {
-  return name
-    .replace(/[/\\]/g, '')
-    .replace(/\.\./g, '')
-    .replace(/[\x00-\x1f\x7f]/g, '')
+export function sanitizeBrowserName(browserName: string): string {
+  return browserName
     .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
     .trim() || 'unknown';
 }
 

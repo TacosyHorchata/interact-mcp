@@ -137,8 +137,7 @@ Errors:
       await bm.ensureBrowser();
       try {
         const page = bm.getPage();
-        const rawPrefix = output_prefix || path.join(TEMP_DIR, 'pilot-responsive');
-        const prefix = rawPrefix ? validateOutputPath(rawPrefix) : rawPrefix;
+        const prefix = validateOutputPath(output_prefix || path.join(TEMP_DIR, 'pilot-responsive'));
         const viewports = [
           { name: 'mobile', width: 375, height: 812 },
           { name: 'tablet', width: 768, height: 1024 },

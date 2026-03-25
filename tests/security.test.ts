@@ -36,6 +36,11 @@ describe('sanitizeBrowserName', () => {
   it('handles mixed case', () => {
     expect(sanitizeBrowserName('ChRoMe')).toBe('chrome');
   });
+
+  it('returns "unknown" when all characters are stripped', () => {
+    expect(sanitizeBrowserName('....')).toBe('unknown');
+    expect(sanitizeBrowserName('!@#$%')).toBe('unknown');
+  });
 });
 
 describe('validateOutputPath', () => {
