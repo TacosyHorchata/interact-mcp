@@ -25,6 +25,8 @@ function wrapForEvaluate(code: string): string {
     : `(async()=>(${trimmed}))()`;
 }
 
+const MAX_EXPRESSION_LENGTH = 50 * 1024;
+
 export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
   server.tool(
     'pilot_console',
@@ -113,14 +115,14 @@ Errors: None — returns empty message if no dialogs were captured.`,
 Use when the user wants to run custom JavaScript on the page, read or modify DOM elements, extract data, or perform calculations. Supports async/await — use "await" to wait for promises. Multi-line code with await is automatically wrapped in an async IIFE.
 
 Parameters:
-- expression: JavaScript expression to evaluate (e.g., "document.title", "JSON.stringify(localStorage)", "await fetch('/api').then(r => r.json())")
+- expression: JavaScript expression to evaluate (e.g., "document.title", "JSON.stringify(localStorage)", "await fetch('/api').then(r => r.json())"). Maximum 50 KB.
 
 Returns: The expression result as a string, or pretty-printed JSON for objects/arrays.
 
 Errors:
 - "Evaluation failed": The JavaScript threw an error. Fix the expression syntax or handle the error in the page context.
 - "Promise rejected": An awaited promise rejected. Check the API endpoint or async logic.`,
-      { expression: z.string().describe('JavaScript expression to evaluate') },
+      { expression: z.string().max(MAX_EXPRESSION_LENGTH).describe('JavaScript expression to evaluate (max 50 KB)') },
     async ({ expression }) => {
       await bm.ensureBrowser();
       try {

@@ -399,17 +399,19 @@ Errors:
     async ({ ref, paths }) => {
       await bm.ensureBrowser();
       try {
-        for (const fp of paths) {
-          if (!fs.existsSync(fp)) throw new Error(`File not found: ${fp}`);
-        }
+        const resolvedPaths = paths.map(fp => {
+          const real = fs.realpathSync(fp);
+          if (!fs.existsSync(real)) throw new Error(`File not found: ${fp} (resolved: ${real})`);
+          return real;
+        });
         const page = bm.getPage();
         const resolved = await bm.resolveRef(ref);
         if ('locator' in resolved) {
-          await resolved.locator.setInputFiles(paths);
+          await resolved.locator.setInputFiles(resolvedPaths);
         } else {
-          await page.locator(resolved.selector).setInputFiles(paths);
+          await page.locator(resolved.selector).setInputFiles(resolvedPaths);
         }
-        const fileInfo = paths.map(fp => {
+        const fileInfo = resolvedPaths.map(fp => {
           const stat = fs.statSync(fp);
           return `${path.basename(fp)} (${stat.size}B)`;
         }).join(', ');
