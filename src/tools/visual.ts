@@ -10,6 +10,16 @@ import * as path from 'path';
 
 const TEMP_DIR = process.platform === 'win32' ? os.tmpdir() : '/tmp';
 
+export function validateOutputPath(outputPath: string): string {
+  const allowedDir = process.env.PILOT_OUTPUT_DIR || os.tmpdir();
+  const resolved = path.resolve(outputPath);
+  const normalizedAllowed = path.resolve(allowedDir);
+  if (!resolved.startsWith(normalizedAllowed + path.sep) && resolved !== normalizedAllowed) {
+    throw new Error(`Output path must be within ${allowedDir}, got: ${outputPath}`);
+  }
+  return resolved;
+}
+
 async function getCleanText(page: import('playwright').Page): Promise<string> {
   return await page.evaluate(() => {
     const body = document.body;
@@ -43,7 +53,7 @@ export function registerVisualTools(server: McpServer, bm: BrowserManager) {
       await bm.ensureBrowser();
       try {
         const page = bm.getPage();
-        const screenshotPath = output_path || path.join(TEMP_DIR, 'pilot-screenshot.png');
+        const screenshotPath = output_path ? validateOutputPath(output_path) : path.join(TEMP_DIR, 'pilot-screenshot.png');
 
         if (ref) {
           const resolved = await bm.resolveRef(ref);
@@ -77,7 +87,7 @@ export function registerVisualTools(server: McpServer, bm: BrowserManager) {
     async ({ output_path }) => {
       await bm.ensureBrowser();
       try {
-        const pdfPath = output_path || path.join(TEMP_DIR, 'pilot-page.pdf');
+        const pdfPath = output_path ? validateOutputPath(output_path) : path.join(TEMP_DIR, 'pilot-page.pdf');
         await bm.getPage().pdf({ path: pdfPath, format: 'A4' });
         return { content: [{ type: 'text' as const, text: `PDF saved: ${pdfPath}` }] };
       } catch (err) {
