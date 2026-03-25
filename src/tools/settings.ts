@@ -14,8 +14,17 @@ import * as fs from 'fs';
 export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
   server.tool(
     'pilot_resize',
-    'Set the browser viewport size.',
-    {
+    `Set the browser viewport size in pixels to simulate different screen resolutions.
+Use when the user wants to test responsive layouts, simulate a mobile or tablet screen, or change the visible area of the page. For multi-viewport screenshots, use pilot_responsive instead.
+
+Parameters:
+- width: Viewport width in pixels (e.g., 1280 for desktop, 375 for mobile)
+- height: Viewport height in pixels (e.g., 720 for desktop, 812 for mobile)
+
+Returns: Confirmation with the new viewport dimensions.
+
+Errors: None — any valid pixel dimensions are accepted.`,
+      {
       width: z.number().describe('Viewport width in pixels'),
       height: z.number().describe('Viewport height in pixels'),
     },
@@ -32,8 +41,18 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_set_cookie',
-    'Set a cookie on the current page domain.',
-    {
+    `Set a cookie on the current page's domain with a given name and value.
+Use when the user wants to manually set a cookie for authentication, testing, or session management. The cookie is set on the domain of the currently active page. For bulk cookie import from a real browser, use pilot_import_cookies.
+
+Parameters:
+- name: Cookie name (e.g., "session_id", "theme")
+- value: Cookie value (e.g., "abc123", "dark")
+
+Returns: Confirmation with the cookie name (value is redacted for security).
+
+Errors:
+- "Cannot set cookie without a page": Navigate to a URL first with pilot_navigate.`,
+      {
       name: z.string().describe('Cookie name'),
       value: z.string().describe('Cookie value'),
     },
@@ -57,8 +76,29 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_import_cookies',
-    'Import cookies from a real Chromium browser (Chrome, Arc, Brave, Edge, Comet). Decrypts from browser cookie database and adds to the headless browser session.',
-    {
+    `Import cookies from a real Chromium browser (Chrome, Arc, Brave, Edge, Comet) by decrypting the browser's cookie database and adding them to the headless session.
+Use when the user wants to transfer authentication state from their real browser, avoid re-login, access authenticated pages, or work with session cookies from an existing browser profile.
+
+Parameters:
+- browser: Browser name to import from — "chrome", "arc", "brave", "edge", or "comet". Auto-detects if omitted
+- domains: Array of cookie domains to import (e.g., [".github.com", ".google.com"]). Required for import mode
+- profile: Browser profile name to read cookies from (default: "Default"). Use list_profiles to see available profiles
+- list_browsers: Set to true to list installed Chromium browsers on the system instead of importing
+- list_profiles: Set to true with browser to list available profiles for that browser
+- list_domains: Set to true with browser to list cookie domains available in that browser's database
+
+Returns:
+- Import mode: Count of cookies imported, per-domain breakdown, and count of any that failed to decrypt
+- list_browsers mode: List of installed browser names
+- list_profiles mode: List of profiles with display names
+- list_domains mode: Top 50 cookie domains with counts
+
+Errors:
+- "No Chromium browsers found": No supported browsers are installed. Check the system.
+- "Browser not found": The specified browser is not installed. Use list_browsers to see available options.
+- "Cookie database not found": The browser's cookie file does not exist at the expected path. Check the profile name.
+- Decryption failures: Some cookies may fail to decrypt (e.g., on Linux without keyring access). The count is reported.`,
+      {
       browser: z.string().optional().describe('Browser name (chrome, arc, brave, edge, comet). Auto-detects if omitted.'),
       domains: z.array(z.string()).describe('Cookie domains to import (e.g. [".github.com", ".google.com"])'),
       profile: z.string().optional().describe('Browser profile name (default: "Default")'),
@@ -116,8 +156,17 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_set_header',
-    'Set a custom request header. Sensitive values are auto-redacted in the response.',
-    {
+    `Set a custom HTTP request header that will be sent with all subsequent requests from the browser.
+Use when the user wants to add an authorization header, set a custom API key, override the Accept-Language header, or inject any custom header for testing. Sensitive header values (Authorization, Cookie, X-API-Key, etc.) are auto-redacted in the response for security.
+
+Parameters:
+- name: Header name (e.g., "Authorization", "X-Custom-Header", "Accept-Language")
+- value: Header value (e.g., "Bearer token123", "en-US")
+
+Returns: Confirmation with the header name and value (sensitive values shown as "****").
+
+Errors: None — any valid header name and value are accepted.`,
+      {
       name: z.string().describe('Header name'),
       value: z.string().describe('Header value'),
     },
@@ -136,8 +185,17 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_set_useragent',
-    'Set the browser user agent string. Recreates the browser context, preserving cookies and state.',
-    { useragent: z.string().describe('User agent string') },
+    `Set a custom browser User-Agent string, which recreates the browser context to apply the change while preserving cookies and page state.
+Use when the user wants to simulate a different browser or device, bypass bot detection, test mobile user agents, or debug User-Agent-dependent behavior. Note: this recreates the browser context, which may briefly interrupt in-progress requests.
+
+Parameters:
+- useragent: The full User-Agent string (e.g., "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15")
+
+Returns: Confirmation with the new User-Agent string.
+
+Errors:
+- Context recreation warnings: If cookies or state could not be fully preserved during context recreation, a warning is included.`,
+      { useragent: z.string().describe('User agent string') },
     async ({ useragent }) => {
       await bm.ensureBrowser();
       try {
@@ -155,8 +213,17 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_handle_dialog',
-    'Configure how dialogs (alert/confirm/prompt) are handled.',
-    {
+    `Configure automatic handling of native browser dialogs (alert, confirm, prompt) that would otherwise block page interaction.
+Use when the user wants to pre-configure dialog behavior so alerts/confirms do not pause automation, or provide a default text for prompt dialogs. Dialog messages are still captured in the dialog buffer (see pilot_dialog).
+
+Parameters:
+- accept: true to automatically accept all dialogs, false to automatically dismiss them
+- prompt_text: Text to automatically enter for prompt-type dialogs (omit for empty string)
+
+Returns: Confirmation of the configured dialog behavior.
+
+Errors: None — this is a configuration-only call that always succeeds.`,
+      {
       accept: z.boolean().describe('true to auto-accept, false to auto-dismiss'),
       prompt_text: z.string().optional().describe('Text to provide for prompt dialogs'),
     },
@@ -173,7 +240,15 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_handoff',
-    'Open a visible (headed) Chrome window with all current state — cookies, tabs, localStorage. Use when headless mode is blocked by CAPTCHAs, bot detection, or complex auth. The user can solve it manually, then call pilot_resume to continue.',
+    `Open a visible (headed) browser window preserving all current state — cookies, tabs, and localStorage.
+Use when the user is blocked by CAPTCHAs, bot detection, or complex auth flows that require manual intervention in a headed browser. After the user solves the challenge, call pilot_resume to reclaim automated control.
+
+Parameters: (none)
+
+Returns: Confirmation that the browser is now in headed mode with instructions to call pilot_resume when done.
+
+Errors:
+- "Browser not initialized": Call pilot_navigate first to start a browser session.`,
     {},
     async () => {
       await bm.ensureBrowser();
@@ -188,7 +263,15 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_resume',
-    'Resume control after user handoff. Takes a fresh snapshot of the current page state.',
+    `Resume automated control after a pilot_handoff session.
+Use when the user has finished manual interaction in the headed browser (e.g., solved a CAPTCHA, completed auth) and wants to return to automated control.
+
+Parameters: (none)
+
+Returns: A fresh accessibility snapshot of the current page state, ready for continued interaction.
+
+Errors:
+- "No browser to resume": No prior pilot_handoff was called or the browser has been closed.`,
     {},
     async () => {
       await bm.ensureBrowser();
@@ -205,7 +288,15 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_close',
-    'Close the browser and clean up all resources.',
+    `Close the browser instance and release all associated resources.
+Use when the user wants to end the browsing session, clean up after completing a task, or start fresh with a new browser session.
+
+Parameters: (none)
+
+Returns: Confirmation that the browser was closed.
+
+Errors:
+- "No browser to close": No browser session is currently running. Safe to ignore.`,
     {},
     async () => {
       try {

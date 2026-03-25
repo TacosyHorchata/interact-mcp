@@ -8,8 +8,21 @@ import * as path from 'path';
 export function registerInteractionTools(server: McpServer, bm: BrowserManager) {
   server.tool(
     'pilot_click',
-    'Click an element by @ref (from snapshot) or CSS selector. Auto-routes <option> clicks to selectOption.',
-    {
+    `Click an element on the page using a ref from pilot_snapshot or a CSS selector.
+Use when the user wants to press a button, follow a link, check a checkbox, or interact with any clickable element. Auto-routes clicks on <option> elements to pilot_select_option.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e3") or a CSS selector (e.g., "button.submit")
+- button: Mouse button to click — "left" (default), "right" (context menu), or "middle"
+- double_click: Set to true for a double-click instead of single click
+
+Returns: Confirmation with the clicked ref and the current URL after navigation (if any).
+
+Errors:
+- "Element not found": The ref is stale or the selector matches nothing. Run pilot_snapshot to get fresh refs.
+- "Element is not clickable": The element exists but is obscured or disabled. Try scrolling to it first with pilot_scroll.
+- "Timeout": The click triggered a navigation that took too long. The page may still be loading.`,
+      {
       ref: z.string().describe('Element ref (@e3) or CSS selector'),
       button: z.enum(['left', 'right', 'middle']).optional().describe('Mouse button'),
       double_click: z.boolean().optional().describe('Double-click instead of single click'),
@@ -64,7 +77,17 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_hover',
-    'Hover over an element by @ref or CSS selector.',
+    `Hover the mouse over an element, triggering hover states, tooltips, and dropdown menus.
+Use when the user wants to reveal hidden content, trigger a CSS :hover effect, or inspect tooltip text.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e7") or a CSS selector
+
+Returns: Confirmation with the hovered element ref.
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.
+- Timeout (5s): The element could not be hovered — it may be off-screen or detached.`,
     { ref: z.string().describe('Element ref (@e3) or CSS selector') },
     async ({ ref }) => {
       await bm.ensureBrowser();
@@ -86,8 +109,20 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_fill',
-    'Clear and fill an input/textarea by @ref or CSS selector.',
-    {
+    `Fill an input or textarea with new text, replacing any existing content.
+Use when the user wants to enter text into a form field, search box, or editable element. Prefer pilot_fill over pilot_type for inputs because it is faster and clears existing content automatically.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e12") or a CSS selector (e.g., "#email")
+- value: The text to fill into the element
+
+Returns: Confirmation with the filled element ref.
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.
+- "Element is not editable": The element is read-only or disabled. Try pilot_click to enable it first.
+- Timeout (5s): The element could not be filled.`,
+      {
       ref: z.string().describe('Element ref (@e3) or CSS selector'),
       value: z.string().describe('Value to fill'),
     },
@@ -111,8 +146,19 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_select_option',
-    'Select a dropdown option by value, label, or visible text.',
-    {
+    `Select an option from a <select> dropdown element by value, label, or visible text.
+Use when the user wants to choose a dropdown option, select from a combobox, or pick from a list. Note: clicking an <option> in pilot_snapshot is auto-routed here.
+
+Parameters:
+- ref: The <select> element reference from snapshot (e.g., "@e5") or a CSS selector
+- value: The option's value attribute, label, or visible text to match
+
+Returns: Confirmation with the selected value and element ref.
+
+Errors:
+- "No option matched": The value does not match any option. Check the exact option text or value attribute via pilot_page_html.
+- "Element not found": The ref is stale or does not point to a <select> element. Run pilot_snapshot.`,
+      {
       ref: z.string().describe('Select element ref (@e3) or CSS selector'),
       value: z.string().describe('Option value, label, or text to select'),
     },
@@ -136,8 +182,19 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_type',
-    'Type text into the currently focused element (character by character).',
-    {
+    `Type text character-by-character into the currently focused element, simulating real keyboard input.
+Use when the user wants to type into a contenteditable div, rich text editor, or a field that reacts to individual keystrokes (e.g., autocomplete, keypress events). For standard <input>/<textarea> elements, prefer pilot_fill which is faster.
+
+Parameters:
+- text: The text string to type
+- submit: Set to true to press Enter after typing (useful for search fields and forms)
+
+Returns: Character count typed and whether Enter was pressed.
+
+Errors:
+- "No element is focused": Nothing is focused on the page. Use pilot_click on the target field first.
+- Timeout: The page became unresponsive during typing.`,
+      {
       text: z.string().describe('Text to type'),
       submit: z.boolean().optional().describe('Press Enter after typing'),
     },
@@ -158,8 +215,17 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_press_key',
-    'Press a keyboard key (Enter, Tab, Escape, ArrowDown, Backspace, etc.).',
-    { key: z.string().describe('Key name (e.g. Enter, Tab, Escape, ArrowDown, Shift+Enter)') },
+    `Press a keyboard key or key combination on the page.
+Use when the user wants to press Enter to submit a form, Tab to move between fields, Escape to close a modal, ArrowDown to navigate a list, or use any keyboard shortcut.
+
+Parameters:
+- key: Key name or combination (e.g., "Enter", "Tab", "Escape", "ArrowDown", "Backspace", "Shift+Enter", "Control+a")
+
+Returns: Confirmation of the key pressed.
+
+Errors:
+- "Unknown key": The key name is not recognized. Use standard Playwright key names (see docs.playwright.dev/key-input).`,
+      { key: z.string().describe('Key name (e.g. Enter, Tab, Escape, ArrowDown, Shift+Enter)') },
     async ({ key }) => {
       await bm.ensureBrowser();
       try {
@@ -175,8 +241,19 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_drag',
-    'Drag from one element to another.',
-    {
+    `Drag one element and drop it onto another element on the page.
+Use when the user wants to move an element, reorder items in a drag-and-drop list, or interact with a drag-and-drop UI.
+
+Parameters:
+- start_ref: The source element reference from snapshot (e.g., "@e3") or CSS selector to drag from
+- end_ref: The target element reference from snapshot (e.g., "@e5") or CSS selector to drop onto
+
+Returns: Confirmation with source and target refs.
+
+Errors:
+- "Element not found": Either ref is stale. Run pilot_snapshot to get fresh refs.
+- Timeout (5s): The drag operation could not be completed. The elements may not support drag-and-drop.`,
+      {
       start_ref: z.string().describe('Source element ref or CSS selector'),
       end_ref: z.string().describe('Target element ref or CSS selector'),
     },
@@ -202,8 +279,19 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_scroll',
-    'Scroll element into view, or scroll to page bottom if no ref provided.',
-    {
+    `Scroll the page or a specific element into view.
+Use when the user wants to scroll down a long page, scroll to the bottom, scroll to the top, or scroll a specific element into the viewport. With a ref, scrolls the element into view. Without a ref, scrolls the page by one viewport height or to a specific position.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e20") or CSS selector to scroll into view (omit for page scroll)
+- direction: Page scroll direction when no ref is provided — "up", "down", "top", or "bottom" (default: "bottom")
+
+Returns: Confirmation of what was scrolled and in which direction.
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.
+- Timeout (5s): The element could not be scrolled into view.`,
+      {
       ref: z.string().optional().describe('Element ref or CSS selector to scroll into view'),
       direction: z.enum(['up', 'down', 'top', 'bottom']).optional().describe('Scroll direction (when no ref)'),
     },
@@ -239,8 +327,20 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_wait',
-    'Wait for element visibility, network idle, or page load.',
-    {
+    `Wait for a specific condition before proceeding — an element to appear, the network to become idle, or the page to finish loading.
+Use when the user wants to wait for a dynamic element to load, wait for AJAX/fetch requests to complete, or wait for a modal/spinner to appear or disappear.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e10") or CSS selector to wait for
+- state: What to wait for — "visible" (element appears, default), "hidden" (element disappears), "networkidle" (no network requests for 500ms), or "load" (page load event)
+- timeout: Maximum wait time in milliseconds (default: 15000)
+
+Returns: Confirmation of what was waited for and its state.
+
+Errors:
+- "Timeout waiting for element": The element did not reach the expected state in time. Increase timeout or check the selector.
+- "Nothing to wait for": Neither ref nor state was provided. Supply at least one.`,
+      {
       ref: z.string().optional().describe('Element ref or CSS selector to wait for'),
       state: z.enum(['visible', 'hidden', 'networkidle', 'load']).optional().describe('What to wait for'),
       timeout: z.number().optional().describe('Timeout in milliseconds (default: 15000)'),
@@ -279,8 +379,20 @@ export function registerInteractionTools(server: McpServer, bm: BrowserManager) 
 
   server.tool(
     'pilot_file_upload',
-    'Upload file(s) to a file input element.',
-    {
+    `Upload one or more files to a file input element on the page.
+Use when the user wants to attach files, upload images, or submit documents through a file input field.
+
+Parameters:
+- ref: The file input element reference from snapshot (e.g., "@e8") or a CSS selector pointing to an <input type="file">
+- paths: Array of absolute file paths to upload (e.g., ["/home/user/photo.png", "/home/user/doc.pdf"])
+
+Returns: Confirmation with file names and sizes uploaded.
+
+Errors:
+- "File not found": One or more paths do not exist on the filesystem. Verify the file paths.
+- "Element not found": The ref is stale or does not point to a file input. Run pilot_snapshot.
+- "Not a file input": The element is not an <input type="file">.`,
+      {
       ref: z.string().describe('File input element ref or CSS selector'),
       paths: z.array(z.string()).describe('File paths to upload'),
     },

@@ -37,8 +37,21 @@ async function getCleanText(page: import('playwright').Page): Promise<string> {
 export function registerVisualTools(server: McpServer, bm: BrowserManager) {
   server.tool(
     'pilot_screenshot',
-    'Take a screenshot of the page or a specific element.',
-    {
+    `Take a PNG screenshot of the current page or a specific element.
+Use when the user wants to capture what the page looks like visually, save a screenshot to disk, or capture a specific element's appearance. For a visual debug overlay with ref labels, use pilot_annotated_screenshot instead.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e3") or CSS selector to screenshot a specific element (omit for full page)
+- full_page: Set to false for viewport-only capture (default: true, captures the entire scrollable page)
+- output_path: File path to save the screenshot (default: /tmp/pilot-screenshot.png). Must be within the allowed output directory
+- clip: Crop region as {x, y, width, height} pixel coordinates for a specific area of the page
+
+Returns: The screenshot as a base64 PNG image and the file path where it was saved.
+
+Errors:
+- "Output path must be within ...": The path is outside the allowed directory. Set PILOT_OUTPUT_DIR or use /tmp.
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.`,
+      {
       ref: z.string().optional().describe('Element ref or CSS selector to screenshot'),
       full_page: z.boolean().optional().describe('Capture full page (default: true)'),
       output_path: z.string().optional().describe('Output file path'),
@@ -82,8 +95,18 @@ export function registerVisualTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_pdf',
-    'Save the current page as a PDF.',
-    { output_path: z.string().optional().describe('Output file path') },
+    `Save the current page as a PDF document in A4 format.
+Use when the user wants to export the page as a downloadable PDF, save a receipt, or archive a page for offline reading.
+
+Parameters:
+- output_path: File path to save the PDF (default: /tmp/pilot-page.pdf). Must be within the allowed output directory
+
+Returns: Confirmation with the file path where the PDF was saved.
+
+Errors:
+- "Output path must be within ...": The path is outside the allowed directory. Set PILOT_OUTPUT_DIR or use /tmp.
+- "Page is not HTML": The current page is a non-HTML resource (e.g., a binary download) and cannot be exported as PDF.`,
+      { output_path: z.string().optional().describe('Output file path') },
     async ({ output_path }) => {
       await bm.ensureBrowser();
       try {
@@ -98,8 +121,18 @@ export function registerVisualTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_responsive',
-    'Take screenshots at mobile (375x812), tablet (768x1024), and desktop (1280x720).',
-    { output_prefix: z.string().optional().describe('File path prefix for screenshots') },
+    `Capture full-page screenshots at three standard responsive breakpoints — mobile (375x812), tablet (768x1024), and desktop (1280x720).
+Use when the user wants to preview how a page looks across different screen sizes, test responsive design, or generate viewport comparison screenshots. The browser viewport is restored to its original size after capture.
+
+Parameters:
+- output_prefix: File path prefix for the saved screenshots (default: /tmp/pilot-responsive). Files are saved as {prefix}-mobile.png, {prefix}-tablet.png, {prefix}-desktop.png
+
+Returns: List of viewport names, dimensions, and file paths for each screenshot.
+
+Errors:
+- "Output path must be within ...": The prefix path is outside the allowed directory.
+- Timeout: The page took too long to render at one of the viewports.`,
+      { output_prefix: z.string().optional().describe('File path prefix for screenshots') },
     async ({ output_prefix }) => {
       await bm.ensureBrowser();
       try {
@@ -131,8 +164,19 @@ export function registerVisualTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_page_diff',
-    'Text diff between two URLs — compare staging vs production, etc.',
-    {
+    `Generate a text diff comparing the visible content of two URLs — useful for comparing staging vs production, before vs after deployments, or detecting content differences between pages.
+Use when the user wants to see what text differs between two pages, verify a deployment did not break content, or compare two versions of the same site. Strips scripts, styles, and SVG before comparing.
+
+Parameters:
+- url1: The first URL to navigate to and capture (shown as removed lines "---" in the diff)
+- url2: The second URL to navigate to and capture (shown as added lines "+++" in the diff)
+
+Returns: Unified diff text showing lines removed from url1 and added in url2.
+
+Errors:
+- "Invalid URL": Either URL is malformed. Provide complete URLs with protocol.
+- Timeout (15s): A page took too long to load. Check the URL or network connectivity.`,
+      {
       url1: z.string().describe('First URL'),
       url2: z.string().describe('Second URL'),
     },

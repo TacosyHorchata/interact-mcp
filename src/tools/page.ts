@@ -20,7 +20,14 @@ async function getCleanText(page: import('playwright').Page): Promise<string> {
 export function registerPageTools(server: McpServer, bm: BrowserManager) {
   server.tool(
     'pilot_page_text',
-    'Extract clean text from the page (strips script/style/noscript/svg).',
+    `Extract all visible text content from the page as clean, trimmed lines.
+Use when the user wants to read the page's text content for analysis, copy text from the page, or extract information without HTML markup. Strips <script>, <style>, <noscript>, and <svg> elements. For structured element access with refs, use pilot_snapshot. For raw HTML, use pilot_page_html.
+
+Parameters: (none)
+
+Returns: Clean text content of the page, one line per block element, with empty lines removed.
+
+Errors: None — returns empty string if the page has no body.`,
     {},
     async () => {
       await bm.ensureBrowser();
@@ -35,8 +42,17 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_page_html',
-    'Get innerHTML of a selector/ref, or full page HTML if none provided.',
-    { ref: z.string().optional().describe('Element ref or CSS selector') },
+    `Get the raw HTML markup of the entire page or a specific element.
+Use when the user needs the HTML source for parsing, inspecting DOM structure, or extracting data that pilot_page_text and pilot_snapshot do not capture (e.g., hidden attributes, meta tags, script content). For an accessibility-focused view with refs, use pilot_snapshot instead.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e5") or CSS selector to get innerHTML of a specific element (omit for full page HTML via page.content())
+
+Returns: Raw HTML string of the page or element.
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.`,
+      { ref: z.string().optional().describe('Element ref or CSS selector') },
     async ({ ref }) => {
       await bm.ensureBrowser();
       try {
@@ -60,7 +76,14 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_page_links',
-    'Get all links on the page as text + href pairs.',
+    `Extract all hyperlinks on the page as text and URL pairs.
+Use when the user wants to see every link on the page, find navigation links, build a sitemap, or locate specific URLs. Links are filtered to exclude empty text or href values.
+
+Parameters: (none)
+
+Returns: List of links in "link text → URL" format, one per line. Returns "(no links found)" if the page has no links.
+
+Errors: None — returns empty message if no links exist.`,
     {},
     async () => {
       await bm.ensureBrowser();
@@ -81,7 +104,14 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_page_forms',
-    'Get all form fields on the page as structured JSON.',
+    `Extract all form elements on the page as structured JSON with their types, names, IDs, and current values.
+Use when the user wants to understand form structure, see all input fields with their current values, check form methods and actions, or plan form filling automation. Password field values are redacted for security.
+
+Parameters: (none)
+
+Returns: JSON array of form objects, each containing the form's index, action URL, method, id, and an array of field objects with tag, type, name, id, placeholder, required, and value.
+
+Errors: None — returns empty array "[]" if no forms exist on the page.`,
     {},
     async () => {
       await bm.ensureBrowser();
@@ -112,8 +142,17 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_page_attrs',
-    'Get all attributes of an element as JSON.',
-    { ref: z.string().describe('Element ref or CSS selector') },
+    `Get all HTML attributes of a specific element as a JSON object.
+Use when the user wants to inspect an element's attributes (data-*, aria-*, class, id, href, src, etc.), check custom data attributes, or debug attribute-related issues.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e3") or CSS selector
+
+Returns: JSON object mapping attribute names to their values.
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.`,
+      { ref: z.string().describe('Element ref or CSS selector') },
     async ({ ref }) => {
       await bm.ensureBrowser();
       try {
@@ -136,8 +175,18 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_page_css',
-    'Get computed CSS property value for an element.',
-    {
+    `Get the computed CSS property value for a specific element.
+Use when the user wants to check styling details (colors, fonts, dimensions, spacing), debug CSS issues, or verify that styles are applied correctly. Returns the final computed value after all CSS rules and inheritance are resolved.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e3") or CSS selector
+- property: CSS property name in kebab-case or camelCase (e.g., "color", "font-size", "backgroundColor", "display")
+
+Returns: The computed CSS property value as a string (e.g., "rgb(255, 0, 0)", "16px", "flex").
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.`,
+      {
       ref: z.string().describe('Element ref or CSS selector'),
       property: z.string().describe('CSS property name (e.g. color, font-size)'),
     },
@@ -160,8 +209,18 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_element_state',
-    'Check element state: visible, hidden, enabled, disabled, checked, editable, focused.',
-    {
+    `Check the current state of an element — whether it is visible, hidden, enabled, disabled, checked, editable, or focused.
+Use when the user wants to verify an element's condition before interacting with it, check if a button is disabled, confirm a checkbox is checked, or debug why an interaction is failing.
+
+Parameters:
+- ref: Element reference from snapshot (e.g., "@e3") or CSS selector
+- property: The state to check — "visible", "hidden", "enabled", "disabled", "checked", "editable", or "focused"
+
+Returns: Boolean string "true" or "false" indicating the element's state for the requested property.
+
+Errors:
+- "Element not found": The ref is stale. Run pilot_snapshot to get fresh refs.`,
+      {
       ref: z.string().describe('Element ref or CSS selector'),
       property: z.enum(['visible', 'hidden', 'enabled', 'disabled', 'checked', 'editable', 'focused']).describe('State to check'),
     },

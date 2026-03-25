@@ -28,8 +28,17 @@ function wrapForEvaluate(code: string): string {
 export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
   server.tool(
     'pilot_console',
-    'Get console messages from the circular buffer.',
-    {
+    `Retrieve browser console messages (console.log, console.warn, console.error) from a circular buffer.
+Use when the user wants to debug JavaScript errors, check application logs, inspect warnings, or see what the page is printing to the console.
+
+Parameters:
+- level: Filter messages by log level — "error" (includes warnings), "warning", "info", or "all" (default: all)
+- clear: Set to true to clear the buffer after reading (useful for checking new messages after an action)
+
+Returns: Timestamped list of console messages with their log level, or "(no console messages)" if the buffer is empty.
+
+Errors: None — returns empty message if no entries match the filter.`,
+      {
       level: z.enum(['error', 'warning', 'info', 'all']).optional().describe('Filter by log level'),
       clear: z.boolean().optional().describe('Clear the buffer after reading'),
     },
@@ -54,8 +63,16 @@ export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_network',
-    'Get network requests from the circular buffer.',
-    { clear: z.boolean().optional().describe('Clear the buffer after reading') },
+    `Retrieve network requests (XHR, fetch, navigation, static assets) from a circular buffer.
+Use when the user wants to debug API calls, check request/response status codes, monitor network activity, or verify that a request was made after an action.
+
+Parameters:
+- clear: Set to true to clear the buffer after reading (useful for isolating new requests after an action)
+
+Returns: List of requests showing method, URL, status code, duration in ms, and response size in bytes. Or "(no network requests)" if the buffer is empty.
+
+Errors: None — returns empty message if no entries exist.`,
+      { clear: z.boolean().optional().describe('Clear the buffer after reading') },
     async ({ clear }) => {
       await bm.ensureBrowser();
       if (clear) { networkBuffer.clear(); return { content: [{ type: 'text' as const, text: 'Network buffer cleared.' }] }; }
@@ -69,8 +86,16 @@ export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_dialog',
-    'Get captured dialog (alert/confirm/prompt) messages.',
-    { clear: z.boolean().optional().describe('Clear the buffer after reading') },
+    `Retrieve captured browser dialog messages (alert, confirm, prompt) from a circular buffer.
+Use when the user wants to see what native dialogs appeared on the page, check prompt text, or verify that a dialog was triggered after an action. Note: configure auto-handling with pilot_handle_dialog to prevent dialogs from blocking page interaction.
+
+Parameters:
+- clear: Set to true to clear the buffer after reading
+
+Returns: Timestamped list of dialogs showing type (alert/confirm/prompt), message text, and the action taken (accepted/dismissed) with any response text. Or "(no dialogs captured)" if empty.
+
+Errors: None — returns empty message if no dialogs were captured.`,
+      { clear: z.boolean().optional().describe('Clear the buffer after reading') },
     async ({ clear }) => {
       await bm.ensureBrowser();
       if (clear) { dialogBuffer.clear(); return { content: [{ type: 'text' as const, text: 'Dialog buffer cleared.' }] }; }
@@ -84,8 +109,18 @@ export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_evaluate',
-    'Run a JavaScript expression on the page and return the result. Supports await.',
-    { expression: z.string().describe('JavaScript expression to evaluate') },
+    `Execute a JavaScript expression or function in the browser page context and return the result.
+Use when the user wants to run custom JavaScript on the page, read or modify DOM elements, extract data, or perform calculations. Supports async/await — use "await" to wait for promises. Multi-line code with await is automatically wrapped in an async IIFE.
+
+Parameters:
+- expression: JavaScript expression to evaluate (e.g., "document.title", "JSON.stringify(localStorage)", "await fetch('/api').then(r => r.json())")
+
+Returns: The expression result as a string, or pretty-printed JSON for objects/arrays.
+
+Errors:
+- "Evaluation failed": The JavaScript threw an error. Fix the expression syntax or handle the error in the page context.
+- "Promise rejected": An awaited promise rejected. Check the API endpoint or async logic.`,
+      { expression: z.string().describe('JavaScript expression to evaluate') },
     async ({ expression }) => {
       await bm.ensureBrowser();
       try {
@@ -101,7 +136,14 @@ export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_cookies',
-    'Get all cookies as JSON.',
+    `Retrieve all cookies for the current page context as a JSON array.
+Use when the user wants to inspect cookies, debug authentication state, check session tokens, or verify that cookies were set correctly. For setting individual cookies, use pilot_set_cookie; for bulk import from a real browser, use pilot_import_cookies.
+
+Parameters: (none)
+
+Returns: JSON array of cookie objects with name, value, domain, path, expires, httpOnly, secure, and sameSite attributes.
+
+Errors: None — returns empty array "[]" if no cookies exist.`,
     {},
     async () => {
       await bm.ensureBrowser();
@@ -116,8 +158,19 @@ export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_storage',
-    'Get localStorage + sessionStorage as JSON (sensitive values redacted). Optionally set a localStorage key.',
-    {
+    `Read or write browser web storage (localStorage and sessionStorage).
+Use when the user wants to inspect stored application data, check feature flags, debug session state, or set a specific localStorage value. Sensitive values (tokens, secrets, API keys) are automatically redacted for security.
+
+Parameters:
+- set_key: If provided, sets this key in localStorage to the value in set_value
+- set_value: The value to set for set_key in localStorage (omit to read all storage instead)
+
+Returns: When reading: JSON object with localStorage and sessionStorage contents (sensitive values redacted as "[REDACTED — N chars]"). When writing: Confirmation of the key set.
+
+Errors: None — returns empty storage objects if no data exists.
+
+Security: Values matching patterns like "eyJ..." (JWTs), "sk-..." (API keys), or keys containing "token", "secret", "password" are auto-redacted.`,
+      {
       set_key: z.string().optional().describe('Key to set in localStorage'),
       set_value: z.string().optional().describe('Value to set'),
     },
@@ -156,7 +209,15 @@ export function registerInspectionTools(server: McpServer, bm: BrowserManager) {
 
   server.tool(
     'pilot_perf',
-    'Get page load performance timings (DNS, TCP, TTFB, DOM parse, load).',
+    `Measure page load performance metrics from the Navigation Timing API.
+Use when the user wants to diagnose slow page loads, benchmark performance, or identify bottlenecks in DNS lookup, connection, server response, or DOM parsing.
+
+Parameters: (none)
+
+Returns: Table of timing metrics in milliseconds — dns, tcp, ssl, ttfb (time to first byte), download, domParse, domReady, and load.
+
+Errors:
+- "No navigation timing data available": The page has not completed a navigation or was loaded via non-standard means. Navigate to the page first with pilot_navigate, then reload.`,
     {},
     async () => {
       await bm.ensureBrowser();
