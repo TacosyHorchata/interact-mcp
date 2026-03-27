@@ -1,8 +1,16 @@
-# pilot
+# pilot — The Fastest MCP Browser Automation Server
 
-> Browser automation for AI agents. 20x faster than the alternatives.
+[![npm](https://img.shields.io/npm/v/pilot-mcp)](https://www.npmjs.com/package/pilot-mcp)
+[![license](https://img.shields.io/github/license/TacosyHorchata/Pilot)](https://github.com/TacosyHorchata/Pilot/blob/main/LICENSE)
+[![stars](https://img.shields.io/github/stars/TacosyHorchata/Pilot)](https://github.com/TacosyHorchata/Pilot)
 
-**pilot** is an MCP server that gives your AI agent a fast, persistent browser. Built on Playwright, it runs Chromium in-process over stdio — no HTTP server, no cold starts, no per-action overhead.
+> MCP browser automation for AI agents. 20x faster than the alternatives.
+
+![pilot demo](pilot-demo.gif)
+
+**pilot** is an MCP server that gives Claude Code, Cursor, and other AI agents a fast, persistent browser for web automation. Built on Playwright, it runs Chromium in-process over stdio — no HTTP server, no cold starts, no per-action overhead. If you need a Playwright MCP alternative with lower latency, more tools, and cookie import, this is it.
+
+<!-- Diagram: Data flow from LLM client through stdio MCP to pilot's in-process Playwright and persistent Chromium browser -->
 
 ```
 LLM Client → stdio (MCP) → pilot → Playwright → Chromium
@@ -11,7 +19,7 @@ First call: ~3s (launch)
 Every call after: ~5-50ms
 ```
 
-## Why pilot?
+## Why pilot? MCP Browser Automation Compared
 
 |  | pilot | @playwright/mcp | BrowserMCP |
 |---|---|---|---|
@@ -27,7 +35,53 @@ Every call after: ~5-50ms
 
 Speed matters when your agent makes hundreds of browser calls in a session. At 100 actions, that's **5 seconds** with pilot vs **20 seconds** with alternatives.
 
-## Quick Start
+## Benchmark — pilot vs @playwright/mcp
+
+Measured end-to-end with **Claude Code (`claude -p`)** as the runtime, 3 runs per task, averaged. Tasks require 2–3 page navigations and interactions (click link → read result) — the realistic workload for an AI agent.
+
+> **Methodology:** `claude -p --output-format stream-json --verbose` captures every intermediate message. Tool result sizes are measured from the raw `tool_result` content blocks. Context tokens = sum of `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` across all turns. Wall time = full task completion including all LLM calls. Full benchmark source in [`benchmark/llm-compare.ts`](benchmark/llm-compare.ts), raw results in [`benchmark/results.jsonl`](benchmark/results.jsonl).
+
+### Multi-step tasks (navigate → interact → read)
+
+| Task | pilot wall time | @playwright/mcp wall time | pilot advantage |
+|------|:-----------:|:---------------------:|:----------:|
+| HN: click top story → read article | **27s** | ❌ failed (bot detection) | — |
+| GitHub: trending → click repo → star count | **29s** | 100s | **71% faster** |
+| GitHub: vscode/releases → latest version | 23s | 19s | — |
+| npm: search "zod" → click → downloads | **21s** | 28s | **26% faster** |
+| Wikipedia: main page → click featured → first sentence | **27s** | 69s | **60% faster** |
+
+**Averages across 5 tasks:**
+
+| Metric | pilot | @playwright/mcp | Delta |
+|--------|:-----:|:---------------:|:-----:|
+| Wall time (avg) | **25s** | 43s | pilot **41% faster** |
+| Tool result size (chars) | **5,230** | 9,165 | pilot **43% smaller** |
+| Cost per task (USD) | **$0.107** | $0.124 | pilot **13% cheaper** |
+| Success rate | **5/5** | 4/5 | pilot more reliable |
+
+### Why pilot is faster on multi-step tasks
+
+`@playwright/mcp` bundles a full page snapshot (~58K chars) into every navigate response. On a 2-page flow, that's ~116K chars of snapshot content entering context — even before the model generates a single token. The LLM then has to attend over that entire context on every subsequent turn, making each API call progressively slower.
+
+pilot's navigate returns a lightweight confirmation. The model requests a snapshot explicitly (`pilot_snapshot`, ~9K chars) and only when it needs one. On the same 2-page flow: ~18K chars of snapshot content. **6× less data in context**, which directly translates to faster LLM inference and lower cost.
+
+```
+@playwright/mcp:  navigate(58K) → navigate(58K) → answer     = 116K snapshot chars
+pilot:           navigate(1K)  → snapshot(9K) → navigate(1K) → snapshot(9K) → answer = 20K snapshot chars
+```
+
+The tradeoff: pilot requires more tool calls per task (avg 4–5 vs 1–2). For simple single-page reads, this roughly cancels out. For multi-step flows — search, click, navigate, extract — pilot wins by a widening margin.
+
+### Reproduce
+
+```bash
+npm run build
+npx tsx benchmark/llm-compare.ts            # multi-step LLM benchmark (claude -p)
+npx tsx benchmark/playwright-compare.ts     # raw MCP tool response sizes + timing
+```
+
+## Quick Start — Add Browser Automation to Claude Code or Cursor
 
 ```bash
 npx pilot-mcp
@@ -243,9 +297,11 @@ Playwright errors are translated into actionable guidance:
 
 Console, network, and dialog events are captured in O(1) ring buffers (50K capacity). Query with `pilot_console`, `pilot_network`, `pilot_dialog`. Never grows unbounded.
 
-## Architecture
+## Architecture — In-Process Playwright MCP Server
 
 pilot runs Playwright **in the same process** as the MCP server. No HTTP layer, no subprocess — direct function calls to the Playwright API over a persistent Chromium instance.
+
+<!-- Diagram: AI agent communicates over stdio to pilot, which runs Playwright and Chromium in the same process for minimal latency -->
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -285,6 +341,32 @@ The core browser automation architecture — ref-based element selection, snapsh
 
 Built on [Playwright](https://playwright.dev/) by Microsoft and the [Model Context Protocol](https://modelcontextprotocol.io/) SDK by Anthropic.
 
+## Frequently Asked Questions
+
+### How do I add browser automation to Claude Code?
+
+Install pilot with `npx pilot-mcp`, then add it to your `.mcp.json` config file. Once configured, Claude Code can navigate pages, click elements, fill forms, take screenshots, and extract data through 51 browser automation tools. See the [Quick Start](#quick-start--add-browser-automation-to-claude-code-or-cursor) section above.
+
+### What is the fastest MCP browser server?
+
+pilot is the fastest MCP browser automation server available. It runs Playwright in-process over stdio with a persistent Chromium instance, achieving ~5-50ms per action compared to ~100-300ms for alternatives like `@playwright/mcp` and BrowserMCP. The speed difference compounds over sessions with hundreds of browser actions.
+
+### How does pilot compare to @playwright/mcp?
+
+pilot offers lower latency (~5-50ms vs ~100-200ms per action), more tools (51 vs 25+), token control for large pages, full iframe support, cookie import from five browsers, snapshot diffing, and a handoff/resume flow for manual intervention. Both are built on Playwright, but pilot runs in-process instead of as a separate process.
+
+### How do I import cookies into an MCP browser session?
+
+Use `pilot_import_cookies` with the browser name and domains you want to import. pilot decrypts cookies directly from the SQLite databases of Chrome, Arc, Brave, Edge, and Comet using platform-specific safe storage keys. Use `list_browsers`, `list_profiles`, and `list_domains` to discover what cookies are available on your system.
+
+### Does pilot work with Cursor?
+
+Yes. Add the same MCP server configuration to your Cursor MCP settings. pilot works with any MCP-compatible client, including Claude Code, Cursor, Windsurf, and other AI coding agents that support the Model Context Protocol.
+
+### How do I handle CAPTCHAs and bot detection?
+
+Call `pilot_handoff` to open a visible Chrome window with your full session state (cookies, tabs, localStorage). Solve the challenge manually, then call `pilot_resume` to continue automation with the updated state. This handoff/resume pattern works for CAPTCHAs, complex auth flows, and any situation where human interaction is needed.
+
 ## License
 
 MIT
@@ -292,3 +374,7 @@ MIT
 ---
 
 If pilot is useful to you, [star the repo](https://github.com/TacosyHorchata/pilot) — it helps others find it.
+
+---
+
+<!-- Keywords: MCP browser automation, MCP server, Playwright MCP, Playwright MCP alternative, fastest MCP server, Claude Code browser, Cursor browser automation, AI browser automation, headless browser MCP, web automation AI agent, browser automation for LLMs, cookie import MCP, Model Context Protocol browser, pilot-mcp, npx pilot-mcp -->
