@@ -1,7 +1,11 @@
 node_modules/
 dist/
-.gstack/
 *.tgz
-docs/
-CLAUDE.md
+
+# Local dev
 .mcp.json
+CLAUDE.md
+.gstack/
+assets/
+docs/
+benchmark.js
