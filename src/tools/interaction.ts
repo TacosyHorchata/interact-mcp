@@ -1,9 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { BrowserManager } from '../browser-manager.js';
+import { takeSnapshot } from '../snapshot.js';
 import { wrapError } from '../errors.js';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/** After an action, take a lightweight snapshot so the LLM doesn't need a separate call */
+async function postActionSnapshot(bm: BrowserManager): Promise<string> {
+  try {
+    const snap = await takeSnapshot(bm, { interactive: true, maxElements: 20, lean: true });
+    return '\n--- page state (interactive, top 20) ---\n' + snap;
+  } catch {
+    return '';
+  }
+}
 
 export function registerInteractionTools(server: McpServer, bm: BrowserManager) {
   server.tool(
@@ -47,7 +58,8 @@ Errors:
             if (optionInfo) {
               await resolved.locator.locator('xpath=ancestor::select').selectOption(optionInfo.value, { timeout: 5000 });
               bm.resetFailures();
-              return { content: [{ type: 'text' as const, text: `Selected "${optionInfo.text}" (auto-routed from click on <option>) → now at ${page.url()}` }] };
+              const snap = await postActionSnapshot(bm);
+              return { content: [{ type: 'text' as const, text: `Selected "${optionInfo.text}" (auto-routed from click on <option>) → now at ${page.url()}${snap}` }] };
             }
           }
         }
@@ -64,7 +76,8 @@ Errors:
         }
         await page.waitForLoadState('domcontentloaded').catch(() => {});
         bm.resetFailures();
-        return { content: [{ type: 'text' as const, text: `Clicked ${ref} → now at ${page.url()}` }] };
+        const snap = await postActionSnapshot(bm);
+        return { content: [{ type: 'text' as const, text: `Clicked ${ref} → now at ${page.url()}${snap}` }] };
       } catch (err) {
         bm.incrementFailures();
         const hint = bm.getFailureHint();
@@ -136,7 +149,8 @@ Errors:
           await bm.getPage().fill(resolved.selector, value, { timeout: 5000 });
         }
         bm.resetFailures();
-        return { content: [{ type: 'text' as const, text: `Filled ${ref}` }] };
+        const snap = await postActionSnapshot(bm);
+        return { content: [{ type: 'text' as const, text: `Filled ${ref}${snap}` }] };
       } catch (err) {
         bm.incrementFailures();
         return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
@@ -172,7 +186,8 @@ Errors:
           await bm.getPage().selectOption(resolved.selector, value, { timeout: 5000 });
         }
         bm.resetFailures();
-        return { content: [{ type: 'text' as const, text: `Selected "${value}" in ${ref}` }] };
+        const snap = await postActionSnapshot(bm);
+        return { content: [{ type: 'text' as const, text: `Selected "${value}" in ${ref}${snap}` }] };
       } catch (err) {
         bm.incrementFailures();
         return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };

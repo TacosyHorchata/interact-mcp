@@ -26,6 +26,15 @@ const INTERACTIVE_ROLES = new Set([
   'treeitem',
 ]);
 
+/** Structural roles that are noise in lean mode when they have no unique content */
+const STRUCTURAL_ROLES = new Set([
+  'table', 'rowgroup', 'row', 'cell', 'grid', 'gridcell',
+  'group', 'list', 'listitem', 'tree', 'treegrid',
+]);
+
+/** Text content that is just visual separators — no semantic value */
+const SEPARATOR_PATTERN = /^[|()·•–—:,\s]+$/;
+
 interface ParsedNode {
   indent: number;
   role: string;
@@ -105,6 +114,17 @@ export async function takeSnapshot(
 
     if (opts.compact && !isInteractive && !node.name && !node.children) continue;
 
+    // ─── Lean mode: strip structural noise ──────────────
+    if (opts.lean) {
+      // Skip empty structural nodes (row/cell/table with no meaningful content)
+      if (STRUCTURAL_ROLES.has(node.role) && !node.name && !node.children) continue;
+      // Skip structural nodes whose name just repeats children (cell "Hacker News..." when children have the links)
+      if (STRUCTURAL_ROLES.has(node.role) && node.name && !isInteractive) continue;
+      // Skip text nodes that are just separators (strip surrounding quotes first)
+      const textContent = (node.children || node.name || '').replace(/^"|"$/g, '').trim();
+      if (node.role === 'text' && SEPARATOR_PATTERN.test(textContent)) continue;
+    }
+
     // ─── Max elements truncation ───────────────────────
     if (opts.maxElements && refCounter > opts.maxElements) {
       skippedCount++;
@@ -137,7 +157,8 @@ export async function takeSnapshot(
 
     refMap.set(ref, { locator, role: node.role, name: node.name || '' });
 
-    let outputLine = `${indent}@${ref} [${node.role}]`;
+    const displayIndent = opts.lean ? ' '.repeat(depth) : indent;
+    let outputLine = `${displayIndent}@${ref} [${node.role}]`;
     if (node.name && !opts.structureOnly) outputLine += ` "${node.name}"`;
     if (node.props) outputLine += ` ${node.props}`;
     if (node.children && !opts.structureOnly) outputLine += `: ${node.children}`;

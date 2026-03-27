@@ -14,6 +14,7 @@ export interface SnapshotOptions {
   cursorInteractive?: boolean;
   maxElements?: number;
   structureOnly?: boolean;
+  lean?: boolean;
 }
 
 export interface ToolResult {
