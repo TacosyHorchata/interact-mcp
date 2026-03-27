@@ -95,6 +95,79 @@ Errors:
   );
 
   server.tool(
+    'pilot_find',
+    `Find an element by visible text, label, placeholder, or role — without running a full snapshot.
+Use when you know what you want to click or fill but don't need to see the entire page tree. Returns a @eN ref immediately usable by pilot_click, pilot_fill, pilot_hover, and other interaction tools. Saves tokens compared to pilot_snapshot when you only need one element.
+
+Parameters:
+- text: Visible text content of the element (e.g., "Sign in", "Submit")
+- label: ARIA label or associated <label> text (e.g., "Email address", "Password")
+- placeholder: Input placeholder text (e.g., "Search...", "Enter email")
+- role: ARIA role to match (e.g., "button", "link", "textbox") — combine with text for precision
+- exact: Set to true for exact text/label match (default: false, substring match)
+
+Returns: A @eN ref for the found element and a description of what was found.
+
+Errors:
+- "Element not found": No element matched the criteria. Verify the text/label or run pilot_snapshot to inspect the page.
+- "Multiple elements found": More than one element matched. Add role or use exact=true to narrow it down.`,
+    {
+      text: z.string().optional().describe('Visible text content to find'),
+      label: z.string().optional().describe('ARIA label or <label> text'),
+      placeholder: z.string().optional().describe('Input placeholder text'),
+      role: z.string().optional().describe('ARIA role (e.g., "button", "link", "textbox")'),
+      exact: z.boolean().optional().describe('Exact match (default: false = substring)'),
+    },
+    async ({ text, label, placeholder, role, exact }) => {
+      await bm.ensureBrowser();
+      try {
+        const frame = bm.getActiveFrame();
+        const exactMatch = exact ?? false;
+
+        let locator;
+        let description = '';
+
+        if (role && text) {
+          locator = frame.getByRole(role as any, { name: text, exact: exactMatch });
+          description = `[${role}] "${text}"`;
+        } else if (label) {
+          locator = frame.getByLabel(label, { exact: exactMatch });
+          description = `label="${label}"`;
+        } else if (placeholder) {
+          locator = frame.getByPlaceholder(placeholder, { exact: exactMatch });
+          description = `placeholder="${placeholder}"`;
+        } else if (role) {
+          locator = frame.getByRole(role as any);
+          description = `[${role}]`;
+        } else if (text) {
+          locator = frame.getByText(text, { exact: exactMatch });
+          description = `"${text}"`;
+        } else {
+          return { content: [{ type: 'text' as const, text: 'Provide at least one of: text, label, placeholder, role' }], isError: true };
+        }
+
+        const count = await locator.count();
+        if (count === 0) {
+          return { content: [{ type: 'text' as const, text: `Element not found: ${description}` }], isError: true };
+        }
+        if (count > 1) {
+          const hint = role && text ? 'use exact=true to require an exact match' : role ? 'add text or label to narrow it down' : 'add role or use exact=true to narrow it down';
+          return { content: [{ type: 'text' as const, text: `Multiple elements found (${count}) for ${description} — ${hint}` }], isError: true };
+        }
+
+        const resolvedRole = role || (label ? 'input' : text ? 'generic' : 'generic');
+        const resolvedName = text || label || placeholder || '';
+        const ref = bm.addSingleRef(locator.first(), resolvedRole, resolvedName);
+        bm.resetFailures();
+        return { content: [{ type: 'text' as const, text: `Found @${ref} ${description}` }] };
+      } catch (err) {
+        bm.incrementFailures();
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
     'pilot_annotated_screenshot',
     `Take a PNG screenshot with red overlay boxes and ref labels at each @eN/@cN element position.
 Use when the user wants a visual debug overlay showing where each snapshot ref is located on the page, or needs to verify element positions visually. Requires a prior pilot_snapshot call to populate the ref positions. For a clean visual capture without debug overlays, use pilot_screenshot instead.

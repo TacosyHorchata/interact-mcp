@@ -307,4 +307,142 @@ Errors:
       }
     }
   );
+
+  server.tool(
+    'pilot_auth',
+    `Save, load, or clear browser session state (cookies + localStorage + sessionStorage) to/from a JSON file.
+Use when the user wants to authenticate once and reuse credentials across sessions, skip re-login flows, or transfer session state between runs. Complement to pilot_import_cookies — use pilot_auth for Pilot-managed state, pilot_import_cookies for one-time import from a real browser.
+
+Parameters:
+- action: "save" — write current session to file; "load" — restore session from file; "clear" — clear cookies and storage from browser
+- path: File path to save or load (e.g., "~/.pilot/github.json"). Required for save/load actions.
+
+Returns:
+- save: Count of cookies saved and the file path.
+- load: Count of cookies restored.
+- clear: Confirmation that cookies and storage were cleared.
+
+Errors:
+- "Session file not found": The path does not exist. Run with action="save" first.
+- "Browser not launched": Navigate to a URL first to initialize the browser.`,
+    {
+      action: z.enum(['save', 'load', 'clear']).describe('Action to perform'),
+      path: z.string().optional().describe('File path to save or load session state (e.g., "~/.pilot/session.json")'),
+    },
+    async ({ action, path: filePath }) => {
+      await bm.ensureBrowser();
+      try {
+        if (action === 'save') {
+          if (!filePath) return { content: [{ type: 'text' as const, text: 'path is required for action="save"' }], isError: true };
+          const count = await bm.saveSessionToFile(filePath);
+          return { content: [{ type: 'text' as const, text: `Saved ${count} cookies to ${filePath}` }] };
+        }
+        if (action === 'load') {
+          if (!filePath) return { content: [{ type: 'text' as const, text: 'path is required for action="load"' }], isError: true };
+          const count = await bm.loadSessionFromFile(filePath);
+          return { content: [{ type: 'text' as const, text: `Loaded ${count} cookies from ${filePath}` }] };
+        }
+        // clear
+        await bm.clearSession();
+        return { content: [{ type: 'text' as const, text: 'Session cleared (cookies + localStorage + sessionStorage)' }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
+    }
+  );
+
+  const ADS_PRESET = [
+    '*googletag*', '*doubleclick.net*', '*adservice.google.*',
+    '*googleadservices.com*', '*googlesyndication.com*', '*.hotjar.com*',
+    '*facebook.com/tr*', '*analytics.twitter.com*', '*bat.bing.com*',
+    '*scorecardresearch.com*', '*.moatads.com*', '*quantserve.com*',
+    '*outbrain.com*', '*taboola.com*', '*criteo.*',
+    '*amazon-adsystem.com*', '*ads.linkedin.com*', '*snap.licdn.com*',
+    '*connect.facebook.net*', '*pixel.facebook.com*',
+  ];
+
+  server.tool(
+    'pilot_block',
+    `Block network requests matching URL patterns to speed up page loads and reduce token noise from ad/tracker content.
+Use when the user wants to block ads, trackers, analytics scripts, or any noisy domain. Blocked requests are aborted before they hit the network — faster loads, smaller snapshots. Use the built-in "ads" preset to block ~20 major ad networks with one call.
+
+Parameters:
+- patterns: Array of URL glob patterns to block (e.g., ["*googletag*", "*.hotjar.com/*"])
+- preset: Built-in preset to block — "ads" blocks ~20 major ad and tracker networks
+- clear: Set to true to remove all active blocks
+
+Returns:
+- Add mode: List of active blocked patterns.
+- clear mode: Confirmation that all blocks were removed.
+
+Errors: None — invalid patterns are silently ignored by the browser.`,
+    {
+      patterns: z.array(z.string()).optional().describe('URL glob patterns to block'),
+      preset: z.enum(['ads']).optional().describe('Built-in preset: "ads" blocks major ad/tracker networks'),
+      clear: z.boolean().optional().describe('Remove all active blocks'),
+    },
+    async ({ patterns, preset, clear }) => {
+      await bm.ensureBrowser();
+      try {
+        if (clear) {
+          await bm.clearBlockPatterns();
+          return { content: [{ type: 'text' as const, text: 'All blocks cleared.' }] };
+        }
+        const toBlock: string[] = [];
+        if (preset === 'ads') toBlock.push(...ADS_PRESET);
+        if (patterns) toBlock.push(...patterns);
+        if (toBlock.length === 0) {
+          const active = bm.getBlockPatterns();
+          return { content: [{ type: 'text' as const, text: active.length > 0 ? `Active blocks (${active.length}):\n${active.join('\n')}` : 'No active blocks.' }] };
+        }
+        for (const p of toBlock) await bm.addBlockPattern(p);
+        const active = bm.getBlockPatterns();
+        return { content: [{ type: 'text' as const, text: `Blocking ${active.length} pattern(s):\n${active.join('\n')}` }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    'pilot_geolocation',
+    `Set or clear the browser's reported GPS coordinates to simulate a specific geographic location.
+Use when the user wants to test location-aware apps, see location-specific content, or simulate a user in a different country/city.
+
+Parameters:
+- latitude: Latitude in decimal degrees (e.g., 19.4326 for Mexico City, 37.7749 for San Francisco)
+- longitude: Longitude in decimal degrees (e.g., -99.1332 for Mexico City, -122.4194 for San Francisco)
+- accuracy: Location accuracy in meters (default: 10)
+- clear: Set to true to remove the fake geolocation and revert to default behavior
+
+Returns: Confirmation of the geolocation set or cleared.
+
+Errors:
+- "Browser not launched": Navigate to a URL first.
+- Geolocation errors may occur if the page requires HTTPS for geolocation access.`,
+    {
+      latitude: z.number().optional().describe('Latitude in decimal degrees'),
+      longitude: z.number().optional().describe('Longitude in decimal degrees'),
+      accuracy: z.number().optional().describe('Accuracy in meters (default: 10)'),
+      clear: z.boolean().optional().describe('Remove fake geolocation'),
+    },
+    async ({ latitude, longitude, accuracy, clear }) => {
+      await bm.ensureBrowser();
+      try {
+        const ctx = bm.getContext();
+        if (clear) {
+          await ctx.setGeolocation(null);
+          return { content: [{ type: 'text' as const, text: 'Geolocation cleared.' }] };
+        }
+        if (latitude === undefined || longitude === undefined) {
+          return { content: [{ type: 'text' as const, text: 'latitude and longitude are required' }], isError: true };
+        }
+        await ctx.grantPermissions(['geolocation']);
+        await ctx.setGeolocation({ latitude, longitude, accuracy: accuracy ?? 10 });
+        return { content: [{ type: 'text' as const, text: `Geolocation set: ${latitude}, ${longitude} (accuracy: ${accuracy ?? 10}m)` }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
+    }
+  );
 }

@@ -9,6 +9,7 @@ import { registerVisualTools } from './visual.js';
 import { registerTabTools } from './tabs.js';
 import { registerSettingsTools } from './settings.js';
 import { registerIframeTools } from './iframe.js';
+import { registerAutomationTools } from './automation.js';
 
 export type ToolProfile = 'core' | 'standard' | 'full';
 
@@ -30,7 +31,7 @@ const CORE_TOOLS = new Set([
 ]);
 
 /**
- * standard (25 tools) — common automation needs without inspection overhead.
+ * standard (28 tools) — common automation needs without inspection overhead.
  */
 const STANDARD_TOOLS = new Set([
   ...CORE_TOOLS,
@@ -46,6 +47,8 @@ const STANDARD_TOOLS = new Set([
   'pilot_annotated_screenshot',
   // iframe
   'pilot_frames', 'pilot_frame_select', 'pilot_frame_reset',
+  // session + config
+  'pilot_auth', 'pilot_block', 'pilot_find',
 ]);
 
 const PROFILE_TOOLS: Record<ToolProfile, Set<string> | null> = {
@@ -80,4 +83,5 @@ export function registerAllTools(server: McpServer, bm: BrowserManager, profile:
   registerTabTools(effectiveServer, bm);
   registerSettingsTools(effectiveServer, bm);
   registerIframeTools(effectiveServer, bm);
+  registerAutomationTools(effectiveServer, bm);
 }

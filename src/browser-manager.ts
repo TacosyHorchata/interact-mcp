@@ -15,6 +15,7 @@ import {
   type Frame,
   type Locator,
   type Cookie,
+  type Route,
 } from 'playwright';
 import {
   addConsoleEntry,
@@ -66,6 +67,14 @@ export class BrowserManager {
   // ─── Failure Tracking ─────────────────────────────────────
   private consecutiveFailures: number = 0;
 
+  // ─── URL Blocking ─────────────────────────────────────────
+  private blockPatterns: Set<string> = new Set();
+  private blockHandlers: Map<string, (route: Route) => void> = new Map();
+
+  // ─── Network Intercepts ───────────────────────────────────
+  private interceptConfigs: Map<string, { status?: number; body?: string; headers?: Record<string, string>; contentType?: string }> = new Map();
+  private interceptHandlers: Map<string, (route: Route) => void> = new Map();
+
   async ensureBrowser(): Promise<void> {
     if (this.browser && this.browser.isConnected()) return;
     await this.launch();
@@ -109,6 +118,7 @@ export class BrowserManager {
 
     // Auto-restore persisted cookies
     await this.loadPersistedState();
+    await this.applyRoutesFromConfig();
 
     await this.newTab();
   }
@@ -488,6 +498,7 @@ export class BrowserManager {
         await this.context.setExtraHTTPHeaders(this.extraHeaders);
       }
       await this.restoreState(state);
+      await this.applyRoutesFromConfig();
       return null;
     } catch (err: unknown) {
       try {
@@ -607,6 +618,139 @@ export class BrowserManager {
       return `HINT: ${this.consecutiveFailures} consecutive failures. Try running pilot_snapshot for fresh refs.`;
     }
     return null;
+  }
+
+  // ─── URL Blocking ─────────────────────────────────────────
+  async addBlockPattern(pattern: string): Promise<void> {
+    if (this.context && this.blockHandlers.has(pattern)) {
+      await this.context.unroute(pattern, this.blockHandlers.get(pattern)!).catch(() => {});
+      this.blockHandlers.delete(pattern);
+    }
+    this.blockPatterns.add(pattern);
+    if (this.context) {
+      const handler = (route: Route) => route.abort();
+      this.blockHandlers.set(pattern, handler);
+      await this.context.route(pattern, handler);
+    }
+  }
+
+  async clearBlockPatterns(): Promise<void> {
+    if (this.context) {
+      for (const [pattern, handler] of this.blockHandlers) {
+        await this.context.unroute(pattern, handler).catch(() => {});
+      }
+    }
+    this.blockHandlers.clear();
+    this.blockPatterns.clear();
+  }
+
+  getBlockPatterns(): string[] {
+    return [...this.blockPatterns];
+  }
+
+  // ─── Network Intercepts ────────────────────────────────────
+  async addIntercept(pattern: string, response: { status?: number; body?: string; headers?: Record<string, string>; contentType?: string }): Promise<void> {
+    if (this.context && this.interceptHandlers.has(pattern)) {
+      await this.context.unroute(pattern, this.interceptHandlers.get(pattern)!).catch(() => {});
+      this.interceptHandlers.delete(pattern);
+    }
+    this.interceptConfigs.set(pattern, response);
+    if (this.context) {
+      const { status = 200, body = '', headers, contentType } = response;
+      const handler = (route: Route) => route.fulfill({ status, body, headers, contentType });
+      this.interceptHandlers.set(pattern, handler);
+      await this.context.route(pattern, handler);
+    }
+  }
+
+  async clearIntercepts(): Promise<void> {
+    if (this.context) {
+      for (const [pattern, handler] of this.interceptHandlers) {
+        await this.context.unroute(pattern, handler).catch(() => {});
+      }
+    }
+    this.interceptHandlers.clear();
+    this.interceptConfigs.clear();
+  }
+
+  getIntercepts(): Array<{ pattern: string; status: number }> {
+    return [...this.interceptConfigs.entries()].map(([pattern, cfg]) => ({
+      pattern,
+      status: cfg.status ?? 200,
+    }));
+  }
+
+  private async applyRoutesFromConfig(): Promise<void> {
+    if (!this.context) return;
+    this.blockHandlers.clear();
+    for (const pattern of this.blockPatterns) {
+      const handler = (route: Route) => route.abort();
+      this.blockHandlers.set(pattern, handler);
+      await this.context.route(pattern, handler);
+    }
+    this.interceptHandlers.clear();
+    for (const [pattern, cfg] of this.interceptConfigs) {
+      const { status = 200, body = '', headers, contentType } = cfg;
+      const handler = (route: Route) => route.fulfill({ status, body, headers, contentType });
+      this.interceptHandlers.set(pattern, handler);
+      await this.context.route(pattern, handler);
+    }
+  }
+
+  // ─── Session Save/Load ────────────────────────────────────
+  async saveSessionToFile(filePath: string): Promise<number> {
+    const state = await this.saveState();
+    const resolvedPath = filePath.replace(/^~/, os.homedir());
+    fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+    fs.writeFileSync(resolvedPath, JSON.stringify(state, null, 2));
+    return state.cookies.length;
+  }
+
+  async loadSessionFromFile(filePath: string): Promise<number> {
+    if (!this.context) throw new Error('Browser not launched');
+    const resolvedPath = filePath.replace(/^~/, os.homedir());
+    if (!fs.existsSync(resolvedPath)) throw new Error(`Session file not found: ${resolvedPath}`);
+    const state = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8')) as BrowserState;
+    if (state.cookies && state.cookies.length > 0) {
+      await this.context.addCookies(state.cookies);
+    }
+    const activePage = this.pages.get(this.activeTabId);
+    if (activePage) {
+      const savedPage = state.pages?.find(p => p.isActive) ?? state.pages?.[0];
+      if (savedPage?.storage) {
+        try {
+          await activePage.evaluate((s) => {
+            for (const [k, v] of Object.entries(s.localStorage || {})) localStorage.setItem(k, v);
+            for (const [k, v] of Object.entries(s.sessionStorage || {})) sessionStorage.setItem(k, v);
+          }, savedPage.storage);
+        } catch {}
+      }
+    }
+    return state.cookies?.length ?? 0;
+  }
+
+  async clearSession(): Promise<void> {
+    if (!this.context) throw new Error('Browser not launched');
+    await this.context.clearCookies();
+    for (const page of this.pages.values()) {
+      try {
+        await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+      } catch {}
+    }
+  }
+
+  // ─── Single Ref Addition (for pilot_find) ─────────────────
+  addSingleRef(locator: Locator, role: string, name: string): string {
+    let maxN = 0;
+    for (const k of this.refMap.keys()) {
+      if (k.startsWith('e')) {
+        const n = parseInt(k.slice(1), 10);
+        if (!isNaN(n) && n > maxN) maxN = n;
+      }
+    }
+    const ref = `e${maxN + 1}`;
+    this.refMap.set(ref, { locator, role, name });
+    return ref;
   }
 
   // ─── Page Event Wiring ────────────────────────────────────
