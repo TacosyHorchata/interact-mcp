@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { BrowserManager } from '../browser-manager.js';
+import { takeSnapshot } from '../snapshot.js';
 import { wrapError } from '../errors.js';
 import { validateNavigationUrl } from '../url-validation.js';
 
@@ -28,7 +29,12 @@ Errors:
         const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
         const status = response?.status() || 'unknown';
         bm.resetFailures();
-        return { content: [{ type: 'text' as const, text: `Navigated to ${url} (${status})` }] };
+        // Auto-snapshot so LLM can act immediately without a separate snapshot call
+        let snap = '';
+        try {
+          snap = '\n--- page state (interactive, top 20) ---\n' + await takeSnapshot(bm, { interactive: true, maxElements: 20, lean: true });
+        } catch {}
+        return { content: [{ type: 'text' as const, text: `Navigated to ${url} (${status})${snap}` }] };
       } catch (err) {
         bm.incrementFailures();
         return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };

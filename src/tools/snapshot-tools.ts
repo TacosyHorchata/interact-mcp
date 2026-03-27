@@ -33,8 +33,10 @@ Errors:
       include_cursor_interactive: z.boolean().optional().describe('Scan for cursor:pointer/onclick/tabindex elements not in ARIA tree'),
       max_elements: z.number().optional().describe('Max elements to include before truncating (saves tokens on large pages)'),
       structure_only: z.boolean().optional().describe('Show tree structure without text content — saves tokens'),
+      lean: z.boolean().optional().default(true).describe('Strip structural noise (empty rows/cells, separator text, duplicate labels). Default: true. Set false for raw ARIA tree.'),
+      verbose: z.boolean().optional().describe('Alias for lean=false. Returns full ARIA tree with all structural nodes.'),
     },
-    async ({ selector, interactive_only, compact, depth, include_cursor_interactive, max_elements, structure_only }) => {
+    async ({ selector, interactive_only, compact, depth, include_cursor_interactive, max_elements, structure_only, lean, verbose }) => {
       await bm.ensureBrowser();
       try {
         const result = await takeSnapshot(bm, {
@@ -45,6 +47,7 @@ Errors:
           cursorInteractive: include_cursor_interactive,
           maxElements: max_elements,
           structureOnly: structure_only,
+          lean: verbose ? false : (lean !== false),
         });
         bm.resetFailures();
         return { content: [{ type: 'text' as const, text: result }] };
@@ -72,13 +75,15 @@ Errors:
       {
       selector: z.string().optional().describe('CSS selector to scope the snapshot'),
       interactive_only: z.boolean().optional().describe('Only show interactive elements'),
+      lean: z.boolean().optional().default(true).describe('Strip structural noise. Default: true.'),
     },
-    async ({ selector, interactive_only }) => {
+    async ({ selector, interactive_only, lean }) => {
       await bm.ensureBrowser();
       try {
         const result = await diffSnapshot(bm, {
           selector,
           interactive: interactive_only,
+          lean: lean !== false,
         });
         bm.resetFailures();
         return { content: [{ type: 'text' as const, text: result }] };
