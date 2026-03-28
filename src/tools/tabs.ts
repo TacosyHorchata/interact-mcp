@@ -20,8 +20,8 @@ Errors: None — returns empty list if no tabs exist (unlikely in normal operati
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ tabs: Array<{ tabId: number; url: string; title: string; active: boolean }> }>('tabs');
-          const text = res.tabs.map(t =>
+          const tabs = await ext.send<Array<{ tabId: number; url: string; title: string; active: boolean }>>('tabs');
+          const text = tabs.map(t =>
             `${t.active ? '→ ' : '  '}[${t.tabId}] ${t.title || '(untitled)'} — ${t.url}`
           ).join('\n');
           return { content: [{ type: 'text' as const, text }] };

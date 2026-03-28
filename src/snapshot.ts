@@ -259,12 +259,13 @@ export async function diffSnapshot(
     rootLocator = frame.locator('body');
   }
 
-  // Take a fresh snapshot (reuses takeSnapshot logic for ref map building)
+  // Save previous snapshot BEFORE takeSnapshot overwrites it
+  const lastSnapshot = bm.getLastSnapshot();
+
+  // Take a fresh snapshot (this updates bm.lastSnapshot internally)
   const currentText = await takeSnapshot(bm, opts);
 
-  const lastSnapshot = bm.getLastSnapshot();
   if (!lastSnapshot || lastSnapshot === currentText) {
-    bm.setLastSnapshot(currentText);
     if (!lastSnapshot) {
       return currentText + '\n\n(no previous snapshot to diff against — this snapshot stored as baseline)';
     }

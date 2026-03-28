@@ -18,9 +18,15 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { execSync } from 'child_process';
 import * as crypto from 'crypto';
 
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
 const PORT = Number(process.env.PILOT_EXTENSION_PORT || 3131);
 const COMMAND_TIMEOUT = 30_000;
 const RECONNECT_DELAY = 3_000;
+const TOKEN_DIR = path.join(os.homedir(), '.pilot');
+const TOKEN_FILE = path.join(TOKEN_DIR, 'broker-token');
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -33,6 +39,7 @@ export class ExtensionServer {
   readonly sessionId = crypto.randomUUID();
   private _counter = 0;
   private pending: Map<string, PendingRequest> = new Map();
+  private _brokerToken: string | null = null;
 
   // Mode
   private mode: 'broker' | 'client' | null = null;
@@ -60,6 +67,12 @@ export class ExtensionServer {
     wss.on('listening', () => {
       this.mode = 'broker';
       this.wss = wss;
+      // Generate and persist a broker token for authentication
+      this._brokerToken = crypto.randomUUID();
+      try {
+        fs.mkdirSync(TOKEN_DIR, { recursive: true });
+        fs.writeFileSync(TOKEN_FILE, this._brokerToken, { mode: 0o600 });
+      } catch {}
       console.error(`[pilot] Broker mode — listening on ws://127.0.0.1:${PORT} (session ${this.sessionId.slice(0, 8)})`);
     });
 
@@ -88,6 +101,12 @@ export class ExtensionServer {
 
       // First message identifies the connection
       if (!identified && msg.type === 'hello') {
+        // Validate broker token
+        if (this._brokerToken && msg.token !== this._brokerToken) {
+          console.error(`[pilot] Rejected connection — invalid token`);
+          ws.close(4001, 'Invalid token');
+          return;
+        }
         identified = true;
         role = msg.role;
 
@@ -232,8 +251,10 @@ export class ExtensionServer {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
-      // Identify ourselves
-      ws.send(JSON.stringify({ type: 'hello', role: 'mcp', sessionId: this.sessionId }));
+      // Identify ourselves with token from broker
+      let token: string | undefined;
+      try { token = fs.readFileSync(TOKEN_FILE, 'utf-8').trim(); } catch {}
+      ws.send(JSON.stringify({ type: 'hello', role: 'mcp', sessionId: this.sessionId, token }));
       console.error(`[pilot] Client mode — connected to broker (session ${this.sessionId.slice(0, 8)})`);
     });
 
@@ -341,6 +362,8 @@ export class ExtensionServer {
       this.extensionSocket = null;
       this.wss?.close();
       this.wss = null;
+      // Clean up token file
+      try { fs.unlinkSync(TOKEN_FILE); } catch {}
     } else if (this.mode === 'client') {
       this.brokerSocket?.close();
       this.brokerSocket = null;
