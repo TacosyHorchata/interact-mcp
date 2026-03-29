@@ -101,9 +101,10 @@ export class ExtensionServer {
 
       // First message identifies the connection
       if (!identified && msg.type === 'hello') {
-        // Validate broker token
-        if (this._brokerToken && msg.token !== this._brokerToken) {
-          console.error(`[pilot] Rejected connection — invalid token`);
+        // Validate broker token for MCP clients (extension is exempt —
+        // it's physically installed by the user and can't read the token file)
+        if (msg.role === 'mcp' && this._brokerToken && msg.token !== this._brokerToken) {
+          console.error(`[pilot] Rejected MCP client — invalid token`);
           ws.close(4001, 'Invalid token');
           return;
         }
