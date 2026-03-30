@@ -84,7 +84,7 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ links: Array<{ text: string; href: string }> }>('page_links');
+          const res = await bm.extSend<{ links: Array<{ text: string; href: string }> }>('page_links');
           const result = res.links.map(l => `${l.text} → ${l.href}`).join('\n');
           return { content: [{ type: 'text' as const, text: truncate(result || '(no links found)', max_chars) }] };
         }
@@ -118,7 +118,7 @@ Errors: None — returns empty array "[]" if no forms exist on the page.`,
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ forms: any[]; count: number }>('page_forms');
+          const res = await bm.extSend<{ forms: any[]; count: number }>('page_forms');
           return { content: [{ type: 'text' as const, text: JSON.stringify(res.forms, null, 2) }] };
         }
         const forms = await bm.getPage().evaluate(() => {
@@ -234,7 +234,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ visible: boolean; enabled: boolean; checked: boolean | null; focused: boolean }>('element_state', { ref });
+          const res = await bm.extSend<{ visible: boolean; enabled: boolean; checked: boolean | null; focused: boolean }>('element_state', { ref });
           const stateMap: Record<string, boolean> = {
             visible: res.visible, hidden: !res.visible,
             enabled: res.enabled, disabled: !res.enabled,

@@ -56,6 +56,7 @@ Errors:
         const ext = bm.getExtension();
         if (ext) {
           const res = await ext.send<{ tabId: number }>('new_tab', { url });
+          bm.setExtActiveTab(res.tabId);
           return { content: [{ type: 'text' as const, text: `Opened tab ${res.tabId}${url ? ` → ${url}` : ''}` }] };
         }
         const id = await bm.newTab(url);
@@ -115,6 +116,7 @@ Errors:
         const ext = bm.getExtension();
         if (ext) {
           await ext.send('switch_tab', { tabId: id });
+          bm.setExtActiveTab(id);
           return { content: [{ type: 'text' as const, text: `Switched to tab ${id}` }] };
         }
         bm.switchTab(id);

@@ -47,7 +47,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ text: string; url: string; title: string; count: number }>('snapshot', {
+          const res = await bm.extSend<{ text: string; url: string; title: string; count: number }>('snapshot', {
             maxElements: max_elements ?? 200,
             interactive_only: interactive_only ?? false,
             structure_only: structure_only ?? false,
@@ -146,7 +146,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ ref: string; tag: string; text: string }>('find', { text, label, role, placeholder });
+          const res = await bm.extSend<{ ref: string; tag: string; text: string }>('find', { text, label, role, placeholder });
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Found ${res.ref} [${res.tag}] "${res.text}"` }] };
         }

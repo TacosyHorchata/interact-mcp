@@ -85,7 +85,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ data: string; mimeType: string }>('screenshot');
+          const res = await bm.extSend<{ data: string; mimeType: string }>('screenshot');
           const screenshotPath = output_path ? validateOutputPath(output_path) : path.join(TEMP_DIR, 'pilot-screenshot.png');
           fs.writeFileSync(screenshotPath, Buffer.from(res.data, 'base64'));
           return {

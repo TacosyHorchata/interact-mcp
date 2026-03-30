@@ -317,7 +317,7 @@ export class ExtensionServer {
     return false;
   }
 
-  async send<T = unknown>(type: string, payload?: Record<string, unknown>): Promise<T> {
+  async send<T = unknown>(type: string, payload?: Record<string, unknown>, overrideTabId?: number): Promise<T> {
     if (!this.isConnected()) {
       throw new Error('Extension not connected');
     }
@@ -339,7 +339,7 @@ export class ExtensionServer {
 
       try {
         if (this.mode === 'broker') {
-          const tabId = this.sessionTabs.get(this.sessionId);
+          const tabId = overrideTabId ?? this.sessionTabs.get(this.sessionId);
           this.extensionSocket!.send(JSON.stringify({ ...cmd, tabId }));
         } else {
           this.brokerSocket!.send(JSON.stringify(cmd));

@@ -77,8 +77,24 @@ export class BrowserManager {
   private interceptHandlers: Map<string, (route: Route) => void> = new Map();
 
   // ─── Extension Bridge ─────────────────────────────────────────
+  private _extActiveTab: number | undefined;
+
   getExtension(): ExtensionServer | null {
     return extensionServer.isConnected() ? extensionServer : null;
+  }
+
+  /** Send a command to the extension, targeting the active tab */
+  async extSend<T = unknown>(type: string, payload?: Record<string, unknown>): Promise<T> {
+    return extensionServer.send<T>(type, payload, this._extActiveTab);
+  }
+
+  /** Update the active extension tab (called by pilot_tab_new / pilot_tab_select) */
+  setExtActiveTab(tabId: number): void {
+    this._extActiveTab = tabId;
+  }
+
+  getExtActiveTab(): number | undefined {
+    return this._extActiveTab;
   }
 
   async ensureBrowser(): Promise<void> {

@@ -30,8 +30,8 @@ Errors:
         await validateNavigationUrl(url);
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ url: string }>('navigate', { url });
-          const snap = await ext.send<{ text: string }>('snapshot', { maxElements: 30 });
+          const res = await bm.extSend<{ url: string }>('navigate', { url });
+          const snap = await bm.extSend<{ text: string }>('snapshot', { maxElements: 30 });
           return { content: [{ type: 'text' as const, text: `Navigated to ${res.url}\n--- interactive elements ---\n${snap.text}` }] };
         }
         const page = bm.getPage();
@@ -72,7 +72,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ url: string }>('back');
+          const res = await bm.extSend<{ url: string }>('back');
           return { content: [{ type: 'text' as const, text: `Back → ${res.url}` }] };
         }
         const page = bm.getPage();
@@ -104,7 +104,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ url: string }>('forward');
+          const res = await bm.extSend<{ url: string }>('forward');
           return { content: [{ type: 'text' as const, text: `Forward → ${res.url}` }] };
         }
         const page = bm.getPage();
@@ -135,7 +135,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          const res = await ext.send<{ url: string }>('reload');
+          const res = await bm.extSend<{ url: string }>('reload');
           return { content: [{ type: 'text' as const, text: `Reloaded ${res.url}` }] };
         }
         const page = bm.getPage();

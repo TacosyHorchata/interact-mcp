@@ -43,7 +43,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          await ext.send('click', { ref, button, double_click });
+          await bm.extSend('click', { ref, button, double_click });
           bm.resetFailures();
           const snap = await ext.send<{ text: string }>('snapshot', { maxElements: 20 });
           return { content: [{ type: 'text' as const, text: `Clicked ${ref}\n--- page state ---\n${snap.text}` }] };
@@ -114,7 +114,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          await ext.send('hover', { ref });
+          await bm.extSend('hover', { ref });
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Hovered ${ref}` }] };
         }
@@ -157,7 +157,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          await ext.send('fill', { ref, value });
+          await bm.extSend('fill', { ref, value });
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Filled ${ref}` }] };
         }
@@ -243,8 +243,8 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          await ext.send('type', { text });
-          if (submit) await ext.send('press', { key: 'Enter' });
+          await bm.extSend('type', { text });
+          if (submit) await bm.extSend('press', { key: 'Enter' });
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Typed ${text.length} characters${submit ? ' + Enter' : ''}` }] };
         }
@@ -278,7 +278,7 @@ Errors:
       try {
         const ext = bm.getExtension();
         if (ext) {
-          await ext.send('press', { key });
+          await bm.extSend('press', { key });
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Pressed ${key}` }] };
         }
@@ -360,7 +360,7 @@ Errors:
             bottom: { deltaX: 0, deltaY: 99999 },
           };
           const delta = ref ? { ref } : scrollMap[direction || 'down'];
-          await ext.send('scroll', delta);
+          await bm.extSend('scroll', delta);
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Scrolled ${ref || direction || 'down'}` }] };
         }
@@ -417,7 +417,7 @@ Errors:
         const ext = bm.getExtension();
         const ms = timeout || 15000;
         if (ext && ref && (!state || state === 'visible')) {
-          await ext.send('wait', { selector: ref.startsWith('@') ? `[data-pilot-ref="${ref.slice(1)}"]` : ref, timeout: ms });
+          await bm.extSend('wait', { selector: ref.startsWith('@') ? `[data-pilot-ref="${ref.slice(1)}"]` : ref, timeout: ms });
           bm.resetFailures();
           return { content: [{ type: 'text' as const, text: `Element ${ref} is visible` }] };
         }
