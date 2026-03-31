@@ -103,10 +103,28 @@ export class BrowserManager {
         const tab = extensionServer.getSessionTab();
         console.error(`[pilot] Extension connected ✓ — using your real Chrome${tab ? ` (tab ${tab})` : ''}`);
         this._loggedExtension = true;
+        this._loggedHeaded = false;
       }
       return;
     }
     if (this.browser && this.browser.isConnected()) return;
+
+    // Wait briefly for extension to connect before falling back to Chromium.
+    // The extension's WebSocket reconnect runs every 3s — give it 5s to connect.
+    if (!this._waitedForExtension) {
+      this._waitedForExtension = true;
+      console.error('[pilot] Waiting for Chrome extension to connect (5s)...');
+      for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        if (extensionServer.isConnected()) {
+          const tab = extensionServer.getSessionTab();
+          console.error(`[pilot] Extension connected ✓ — using your real Chrome${tab ? ` (tab ${tab})` : ''}`);
+          this._loggedExtension = true;
+          return;
+        }
+      }
+    }
+
     if (!this._loggedHeaded) {
       console.error('[pilot] Extension not connected — running in headed Chromium mode');
       console.error('[pilot] For best experience, install the extension: npx pilot-mcp --install-extension');
@@ -114,6 +132,7 @@ export class BrowserManager {
     }
     await this.launch();
   }
+  private _waitedForExtension = false;
   private _loggedExtension = false;
   private _loggedHeaded = false;
 
