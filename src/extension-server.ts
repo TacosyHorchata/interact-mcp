@@ -25,6 +25,8 @@ import * as os from 'os';
 const PORT = Number(process.env.PILOT_EXTENSION_PORT || 3131);
 const COMMAND_TIMEOUT = 30_000;
 const RECONNECT_DELAY = 3_000;
+const HEARTBEAT_INTERVAL = 15_000; // ping clients every 15s
+const HEARTBEAT_TIMEOUT = 10_000;  // dead if no pong within 10s
 const TOKEN_DIR = path.join(os.homedir(), '.pilot');
 const TOKEN_FILE = path.join(TOKEN_DIR, 'broker-token');
 
@@ -49,6 +51,7 @@ export class ExtensionServer {
   private extensionSocket: WebSocket | null = null;
   private mcpClients: Map<string, WebSocket> = new Map(); // sessionId → ws
   private sessionTabs: Map<string, number> = new Map();   // sessionId → chrome tabId
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   // Client state
   private brokerSocket: WebSocket | null = null;
@@ -73,6 +76,7 @@ export class ExtensionServer {
         fs.mkdirSync(TOKEN_DIR, { recursive: true });
         fs.writeFileSync(TOKEN_FILE, this._brokerToken, { mode: 0o600 });
       } catch {}
+      this._startHeartbeat();
       console.error(`[pilot] Broker mode — listening on ws://127.0.0.1:${PORT} (session ${this.sessionId.slice(0, 8)})`);
     });
 
@@ -118,7 +122,10 @@ export class ExtensionServer {
           this.extensionSocket = ws;
           this._checkState();
 
-          // Initialize tabs for all existing sessions (including broker's own)
+          // Prune dead clients before re-initializing tabs
+          this._pruneDeadClients();
+
+          // Initialize tabs for all live sessions (including broker's own)
           for (const sid of [this.sessionId, ...this.mcpClients.keys()]) {
             if (!this.sessionTabs.has(sid)) {
               this._initSession(sid);
@@ -197,6 +204,46 @@ export class ExtensionServer {
     this.extensionSocket.send(JSON.stringify({
       id: `sys-close-${sessionId.slice(0, 8)}`, type: 'session_close', sessionId, tabId,
     }));
+  }
+
+  /** Remove MCP clients whose WebSocket is no longer open */
+  private _pruneDeadClients(): void {
+    for (const [sid, ws] of this.mcpClients) {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.error(`[pilot] Pruned stale session ${sid.slice(0, 8)} (readyState=${ws.readyState})`);
+        this.mcpClients.delete(sid);
+        this._closeSession(sid);
+        this.sessionTabs.delete(sid);
+      }
+    }
+  }
+
+  /** Periodic heartbeat to detect dead clients proactively */
+  private _startHeartbeat(): void {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      for (const [sid, ws] of this.mcpClients) {
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.error(`[pilot] Heartbeat: pruned dead session ${sid.slice(0, 8)}`);
+          this.mcpClients.delete(sid);
+          this._closeSession(sid);
+          this.sessionTabs.delete(sid);
+          continue;
+        }
+        // Ping with timeout — if no pong, terminate
+        ws.ping();
+        const pongTimer = setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            console.error(`[pilot] Heartbeat: session ${sid.slice(0, 8)} unresponsive — terminating`);
+            ws.terminate();
+            this.mcpClients.delete(sid);
+            this._closeSession(sid);
+            this.sessionTabs.delete(sid);
+          }
+        }, HEARTBEAT_TIMEOUT);
+        ws.once('pong', () => clearTimeout(pongTimer));
+      }
+    }, HEARTBEAT_INTERVAL);
   }
 
   /** Forward command from MCP client to extension */
@@ -354,6 +401,10 @@ export class ExtensionServer {
 
   stop(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     if (this.mode === 'broker') {
       // Close all MCP client connections
       for (const ws of this.mcpClients.values()) ws.close();
