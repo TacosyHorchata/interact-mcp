@@ -5,12 +5,14 @@
   "description": "Connect Claude Code to your real Chrome browser via Pilot MCP",
   "permissions": [
     "tabs",
-    "tabGroups",
     "activeTab",
     "scripting",
     "webNavigation",
     "cookies",
     "storage"
+  ],
+  "optional_permissions": [
+    "tabGroups"
   ],
   "host_permissions": [
     "<all_urls>"

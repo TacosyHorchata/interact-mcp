@@ -154,19 +154,21 @@ async function initSession(sessionId) {
   const tab = await chrome.tabs.create({ url: 'about:blank', active: false });
   sessionTabs.set(sessionId, tab.id);
 
-  // Create a tab group for this session
-  try {
-    const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-    const color = GROUP_COLORS[colorIndex++ % GROUP_COLORS.length];
-    await chrome.tabGroups.update(groupId, {
-      title: `✈️ ${sessionId.slice(0, 6)}`,
-      color,
-      collapsed: false,
-    });
-    sessionGroups.set(sessionId, groupId);
-    console.log(`[pilot] Session ${sessionId.slice(0, 8)} → tab ${tab.id} (group ${color})`);
-  } catch (err) {
-    console.warn('[pilot] Could not create tab group:', err);
+  // Create a tab group for this session (optional — not supported in all browsers)
+  if (chrome.tabGroups) {
+    try {
+      const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+      const color = GROUP_COLORS[colorIndex++ % GROUP_COLORS.length];
+      await chrome.tabGroups.update(groupId, {
+        title: `✈️ ${sessionId.slice(0, 6)}`,
+        color,
+        collapsed: false,
+      });
+      sessionGroups.set(sessionId, groupId);
+      console.log(`[pilot] Session ${sessionId.slice(0, 8)} → tab ${tab.id} (group ${color})`);
+    } catch (err) {
+      console.warn('[pilot] Could not create tab group:', err);
+    }
   }
 
   return { tabId: tab.id };
