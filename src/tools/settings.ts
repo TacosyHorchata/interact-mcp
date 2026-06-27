@@ -12,6 +12,31 @@ import {
 import * as fs from 'fs';
 
 export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
+  async function getExtensionStatusContent() {
+    const { extensionServer } = await import('../extension-server.js');
+    const connected = extensionServer.isConnected();
+    const mode = extensionServer.getMode();
+    const backend = extensionServer.getBackend();
+    const session = extensionServer.getSessionId().slice(0, 8);
+    const tab = extensionServer.getSessionTab();
+    const clients = extensionServer.getClientCount();
+
+    if (connected) {
+      let status = `Pilot browser backend ready ✓\nMode: ${mode} | Backend: ${backend} | Session: ${session}`;
+      if (tab) status += ` | Tab: ${tab}`;
+      if (mode === 'broker' && clients > 0) status += ` | Other sessions: ${clients}`;
+      return { content: [{ type: 'text' as const, text: status }] };
+    }
+
+    await bm.ensureBrowser();
+    const tabs = await bm.getTabListWithTitles();
+    const activeTab = tabs.find((item) => item.active);
+    const activeText = activeTab
+      ? ` | Active fallback tab: ${activeTab.id} (${activeTab.url})`
+      : '';
+    return { content: [{ type: 'text' as const, text: `Pilot browser backend not connected (mode: ${mode}, backend: ${backend}, session: ${session})${activeText}.\nFallback: headed Chromium context owned by this MCP process.` }] };
+  }
+
   server.tool(
     'pilot_resize',
     `Set the browser viewport size in pixels to simulate different screen resolutions.
@@ -242,28 +267,30 @@ Errors: None — this is a configuration-only call that always succeeds.`,
   server.tool(
     'pilot_extension_status',
     `Check if the Pilot Chrome extension is connected and routing commands through the user's real browser.
+Use when the user wants to verify extension mode, inspect the current Pilot session id, or confirm the tab assigned to this MCP session.
 When connected, all navigation, snapshot, click, fill, type, scroll, screenshot, and tab commands route through Chrome — bypassing Cloudflare and bot detection.
 
 Parameters: (none)
 
-Returns: Connection status, port, and instructions for installing the extension if not connected.`,
-    {},
-    async () => {
-      const { extensionServer } = await import('../extension-server.js');
-      const connected = extensionServer.isConnected();
-      const mode = extensionServer.getMode();
-      const session = extensionServer.getSessionId().slice(0, 8);
-      const tab = extensionServer.getSessionTab();
-      const clients = extensionServer.getClientCount();
+Returns: Connection status, port, and instructions for installing the extension if not connected.
 
-      if (connected) {
-        let status = `Extension connected ✓\nMode: ${mode} | Session: ${session}`;
-        if (tab) status += ` | Tab: ${tab}`;
-        if (mode === 'broker' && clients > 0) status += ` | Other sessions: ${clients}`;
-        return { content: [{ type: 'text' as const, text: status }] };
-      }
-      return { content: [{ type: 'text' as const, text: `Extension not connected (mode: ${mode}, session: ${session}).\n\nTo use the Pilot extension:\n1. Open Chrome → chrome://extensions → Enable Developer Mode\n2. Load unpacked → select the "extension/" folder in the Pilot repo\n3. The extension auto-connects to ws://127.0.0.1:3131` }] };
-    }
+Errors: None — returns installation/reconnect instructions when the extension is not connected.`,
+    {},
+    getExtensionStatusContent
+  );
+
+  server.tool(
+    'pilot_status',
+    `Check Pilot browser routing status, including extension connection mode, current Pilot session id, assigned tab, and other connected sessions.
+Use when the user wants to verify Pilot MCP health, prove which browser session a test is using, or check session-to-tab/context isolation before parallel QA.
+
+Parameters: (none)
+
+Returns: Connection status with mode, session id, assigned tab id when available, other-session count, or headed Chromium fallback context details.
+
+Errors: None — returns installation/reconnect instructions when the extension is not connected.`,
+    {},
+    getExtensionStatusContent
   );
 
   server.tool(
@@ -368,7 +395,7 @@ Errors:
 
   server.tool(
     'pilot_auth',
-    `Save, load, or clear browser session state (cookies + localStorage + sessionStorage) to/from a JSON file.
+    `Manage saved browser session state (cookies + localStorage + sessionStorage) to/from a JSON file.
 Use when the user wants to authenticate once and reuse credentials across sessions, skip re-login flows, or transfer session state between runs. Complement to pilot_import_cookies — use pilot_auth for Pilot-managed state, pilot_import_cookies for one-time import from a real browser.
 
 Parameters:

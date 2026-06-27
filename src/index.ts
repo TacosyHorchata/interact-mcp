@@ -88,7 +88,7 @@ async function main() {
 // Graceful shutdown
 async function shutdown() {
   console.error('[pilot] Shutting down...');
-  extensionServer.stop();
+  await extensionServer.stop();
   await browserManager.close();
   process.exit(0);
 }

@@ -12,13 +12,18 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "stress:screenshots": "npm run build && node scripts/pilot-screenshot-stress.js --start-broker",
+    "stress:codex": "npm run build && node scripts/pilot-codex-exec-stress.js",
     "postinstall": "node scripts/postinstall.js",
     "test": "vitest run"
   },
   "files": [
     "dist",
+    "docs/native-mode.md",
     "extension",
     "scripts/postinstall.js",
+    "scripts/pilot-codex-exec-stress.js",
+    "scripts/pilot-screenshot-stress.js",
     "README.md",
     "LICENSE"
   ],

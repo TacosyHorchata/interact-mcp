@@ -10,19 +10,52 @@ import * as path from 'path';
 
 const TEMP_DIR = process.platform === 'win32' ? os.tmpdir() : '/tmp';
 
+function resolveForContainment(targetPath: string): string {
+  const resolvedPath = path.resolve(targetPath);
+  const parts = resolvedPath.split(path.sep).filter(Boolean);
+
+  for (let i = parts.length; i >= 0; i--) {
+    const existingPrefix = path.sep + parts.slice(0, i).join(path.sep);
+    if (!fs.existsSync(existingPrefix)) continue;
+
+    const realPrefix = fs.realpathSync(existingPrefix);
+    const suffix = parts.slice(i);
+    return suffix.length > 0 ? path.join(realPrefix, ...suffix) : realPrefix;
+  }
+
+  return resolvedPath;
+}
+
 export function validateOutputPath(outputPath: string): string {
   const allowed = process.env.PILOT_OUTPUT_DIR || os.tmpdir();
+  const allowedAliases =
+    process.platform === 'darwin' && allowed === os.tmpdir()
+      ? [path.resolve('/tmp')]
+      : [];
   let normalizedAllowed: string;
   try {
     normalizedAllowed = fs.realpathSync(path.resolve(allowed));
   } catch {
     normalizedAllowed = path.resolve(allowed);
   }
+  const normalizedAllowedAliases = allowedAliases.map((alias) => {
+    try {
+      return fs.realpathSync(alias);
+    } catch {
+      return alias;
+    }
+  });
+  const isWithinAllowed = (candidate: string) => {
+    const allowedRoots = [normalizedAllowed, ...normalizedAllowedAliases];
+    return allowedRoots.some(
+      (root) => candidate === root || candidate.startsWith(root + path.sep),
+    );
+  };
   try {
     const parentDir = path.dirname(outputPath);
     const realParent = fs.realpathSync(parentDir);
     const resolved = path.resolve(realParent, path.basename(outputPath));
-    if (!resolved.startsWith(normalizedAllowed + path.sep) && resolved !== normalizedAllowed) {
+    if (!isWithinAllowed(resolved)) {
       throw new Error(`Output path must be within ${normalizedAllowed}: ${outputPath}`);
     }
     return resolved;
@@ -30,8 +63,8 @@ export function validateOutputPath(outputPath: string): string {
     if (err instanceof Error && err.message.includes('Output path must be within')) {
       throw err;
     }
-    const resolved = path.resolve(outputPath);
-    if (!resolved.startsWith(normalizedAllowed + path.sep) && resolved !== normalizedAllowed) {
+    const resolved = resolveForContainment(outputPath);
+    if (!isWithinAllowed(resolved)) {
       throw new Error(`Output path must be within ${normalizedAllowed}: ${outputPath}`);
     }
     return resolved;

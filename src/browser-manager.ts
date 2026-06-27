@@ -101,7 +101,7 @@ export class BrowserManager {
     if (extensionServer.isConnected()) {
       if (!this._loggedExtension) {
         const tab = extensionServer.getSessionTab();
-        console.error(`[pilot] Extension connected ✓ — using your real Chrome${tab ? ` (tab ${tab})` : ''}`);
+        console.error(`[pilot] Browser backend ready ✓ — using ${extensionServer.getBackend()}${tab ? ` (tab ${tab})` : ''}`);
         this._loggedExtension = true;
         this._loggedHeaded = false;
       }
@@ -118,7 +118,7 @@ export class BrowserManager {
         await new Promise(r => setTimeout(r, 500));
         if (extensionServer.isConnected()) {
           const tab = extensionServer.getSessionTab();
-          console.error(`[pilot] Extension connected ✓ — using your real Chrome${tab ? ` (tab ${tab})` : ''}`);
+          console.error(`[pilot] Browser backend ready ✓ — using ${extensionServer.getBackend()}${tab ? ` (tab ${tab})` : ''}`);
           this._loggedExtension = true;
           return;
         }

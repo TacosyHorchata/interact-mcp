@@ -45,6 +45,8 @@ const STANDARD_TOOLS = new Set([
   'pilot_page_text', 'pilot_page_html',
   // visual
   'pilot_annotated_screenshot',
+  // diagnostics
+  'pilot_console', 'pilot_extension_status', 'pilot_status',
   // iframe
   'pilot_frames', 'pilot_frame_select', 'pilot_frame_reset',
   // session + config

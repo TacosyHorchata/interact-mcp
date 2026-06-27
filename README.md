@@ -1,40 +1,34 @@
-# pilot — AI agents in your real Chrome
+# pilot — browser automation MCP for AI agents
 
 [![npm](https://img.shields.io/npm/v/pilot-mcp)](https://www.npmjs.com/package/pilot-mcp)
 [![license](https://img.shields.io/github/license/TacosyHorchata/Pilot)](https://github.com/TacosyHorchata/Pilot/blob/main/LICENSE)
 [![stars](https://img.shields.io/github/stars/TacosyHorchata/Pilot)](https://github.com/TacosyHorchata/Pilot)
 
-> Install a Chrome extension. Your AI agent gets a tab in the browser you're already using.
+> Native Playwright-backed browser sessions by default. No Chrome extension required for QA automation.
 
 ![pilot demo](pilot-demo.gif)
 
-Every other browser tool launches a **new, anonymous browser**. Your agent starts logged out, gets blocked by Cloudflare, can't reach anything behind auth.
+Pilot has two browser backends:
 
-Pilot is a Chrome extension + MCP server. It connects your AI agent to **your real browser** — same sessions, same cookies, same logins. Your agent sees what you see.
+- **Native mode** (default): isolated Playwright browser contexts. This is the supported path for parallel QA automation and reliable screenshots.
+- **Extension mode** (legacy/opt-in): connects to your real Chrome profile when you need existing cookies and logged-in sessions.
 
-```
-You: "Summarize my GitHub notifications"
-
-→ New tab opens in YOUR Chrome
-→ Already logged into GitHub
-→ Agent reads, summarizes, done
-```
-
-No headless browser. No cookie hacking. No re-authentication. No bot detection.
+Native mode avoids `chrome.tabs.captureVisibleTab()` entirely, so screenshots do not depend on Chrome being foregrounded, a tab being visibly active, or the extension service worker being fresh.
 
 ---
 
 ## How it works
 
 ```
-AI Agent → MCP Server → WebSocket → Chrome Extension → Tab in your browser
-         (stdio)       (localhost)
+AI Agent → MCP Server → Broker on 127.0.0.1:3131 → Native browser session
+         (stdio)       (first process owns broker)  (Playwright context/page)
 ```
 
 1. **Pilot runs as an MCP server** — Claude Code, Cursor, or any MCP client connects via stdio
-2. **The Chrome extension connects** via WebSocket on localhost
-3. **Your agent gets its own tab** in your real Chrome — all your sessions intact
-4. **Multiple agents get separate tabs** — color-grouped so you can tell them apart
+2. **The first Pilot process becomes the broker** on localhost
+3. **Later Pilot processes connect as broker clients**
+4. **Each session gets an isolated native browser context/page**
+5. **Screenshots come from Playwright**, not the Chrome extension capture API
 
 ---
 
@@ -42,30 +36,31 @@ AI Agent → MCP Server → WebSocket → Chrome Extension → Tab in your brows
 
 ### 1. Add the MCP server
 
-```json
-{
-  "mcpServers": {
-    "pilot": {
-      "command": "npx",
-      "args": ["-y", "pilot-mcp"]
-    }
-  }
-}
+```bash
+codex mcp add pilot \
+  --env PILOT_BROWSER_MODE=native \
+  --env PILOT_PROFILE=full \
+  -- npx -y pilot-mcp
 ```
 
-### 2. Install the Chrome extension
+For a local checkout:
 
 ```bash
-npx pilot-mcp --install-extension
+npm install
+npm run build
+codex mcp add pilot \
+  --env PILOT_BROWSER_MODE=native \
+  --env PILOT_PROFILE=full \
+  -- node /absolute/path/to/pilot/dist/index.js
 ```
 
-Opens Chrome's extensions page. Click **Load unpacked** → select the path shown in terminal.
+### 2. Use it
 
-### 3. Use it
+> "Open https://example.com, take a screenshot, and summarize the page."
 
-> "Go to my GitHub notifications and summarize them"
+No extension install. No Chrome foreground requirement.
 
-A tab opens in your Chrome — already logged in as you.
+For full native-mode operations, stress commands, and cleanup checks, see [docs/native-mode.md](docs/native-mode.md).
 
 ---
 
@@ -88,9 +83,9 @@ Less context = faster responses, cheaper API calls, fewer hallucinations.
 
 | | Pilot | @playwright/mcp |
 |---|---|---|
-| **Browser** | Your real Chrome (extension) | New Chromium instance |
-| **Auth state** | Already logged in everywhere | Anonymous — manual setup |
-| **Bot detection** | Real fingerprint — not blocked | Blocked by Cloudflare |
+| **Browser** | Native Playwright context by default; real Chrome via legacy extension | New Chromium instance |
+| **Auth state** | Native isolated by default; extension mode can use real Chrome cookies | Anonymous — manual setup |
+| **Bot detection** | Native for automation; extension mode for real-profile handoff | Blocked by Cloudflare |
 | **Snapshot size** | ~2K navigate, ~9K full | ~50-60K |
 | **Snapshot diff** | `pilot_snapshot_diff` | ❌ |
 | **Cookie import** | Chrome, Arc, Brave, Edge, Comet | Manual JSON |
@@ -126,28 +121,59 @@ Default: `standard`. [Full tool reference →](https://github.com/TacosyHorchata
 
 ---
 
-## Headed fallback
+## Native mode
 
-When the extension isn't connected, Pilot opens a visible Chromium window automatically.
+Native mode is the default:
+
+```bash
+PILOT_BROWSER_MODE=native
+```
+
+Use it for QA automation, parallel MCP sessions, and screenshot evidence.
+
+Verify it before QA runs:
+
+```bash
+PILOT_HEADLESS=1 npm run stress:screenshots
+npm run stress:codex
+```
+
+Expected: both report `6/6 passed`.
+
+## Extension mode
+
+Extension mode is legacy and opt-in:
+
+```bash
+PILOT_BROWSER_MODE=extension
+```
+
+Use it only when you need a user's already-authenticated real Chrome profile.
 
 Import cookies from your real browser: `pilot_import_cookies({ browser: "chrome", domains: [".github.com"] })`
 
 Supports **Chrome, Arc, Brave, Edge, Comet** via macOS Keychain / Linux libsecret. For CAPTCHAs: `pilot_handoff` → you intervene → `pilot_resume`.
-
-Requires: `npx playwright install chromium`
 
 ---
 
 ## Requirements
 
 - Node.js >= 18
-- Chrome + Pilot extension (recommended)
+- Playwright Chromium
 - macOS or Linux
-- Fallback only: `npx playwright install chromium`
+- Extension mode only: Chrome + Pilot extension
+
+If Chromium is missing:
+
+```bash
+npx playwright install chromium
+```
 
 ## Security
 
 - Extension communicates on **localhost only** (127.0.0.1)
+- Native broker communicates on **localhost only** (127.0.0.1)
+- Native sessions use isolated browser contexts per MCP session
 - Output path validation prevents writes outside `PILOT_OUTPUT_DIR`
 - Path traversal protection on all file operations
 - `PILOT_PROFILE` controls which tools are exposed (`core` / `standard` / `full`)

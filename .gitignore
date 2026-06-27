@@ -5,9 +5,14 @@ dist/
 # Local dev
 .mcp.json
 CLAUDE.md
+AGENTS.md
 .gstack/
 .claude/
+.agents/
+_bmad/
+_bmad-output/
 .playwright-cli/
 assets/
-docs/
+docs/*
+!docs/native-mode.md
 benchmark.js
