@@ -581,6 +581,8 @@ export class ExtensionServer {
       ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
       ...(isLinux && process.env.PILOT_CHROMIUM_PATH ? { executablePath: process.env.PILOT_CHROMIUM_PATH } : {}),
     });
+    const browserProcess = (this.nativeBrowser as Browser & { process?: () => { pid?: number } | null }).process?.();
+    if (browserProcess?.pid) this.nativeBrowserPids.add(browserProcess.pid);
     const childPidsAfter = this._childPids();
     for (const pid of childPidsAfter) {
       if (!childPidsBefore.has(pid) && this._isNativeBrowserPid(pid)) {
@@ -617,7 +619,7 @@ export class ExtensionServer {
     }
   }
 
-  private _killNativeBrowserChildren(): void {
+  private async _killNativeBrowserChildren(): Promise<void> {
     const pids = new Set<number>();
     for (const pid of this.nativeBrowserPids) {
       pids.add(pid);
@@ -625,8 +627,19 @@ export class ExtensionServer {
     }
     const ordered = [...pids].sort((a, b) => b - a);
     for (const pid of ordered) try { process.kill(pid, 'SIGTERM'); } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
     for (const pid of ordered) try { process.kill(pid, 'SIGKILL'); } catch {}
+    await this._waitForPidsExit(ordered, 1000);
     this.nativeBrowserPids.clear();
+  }
+
+  private async _waitForPidsExit(pids: number[], timeoutMs: number): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const alive = pids.filter((pid) => this._pidAlive(pid));
+      if (alive.length === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   }
 
   private _descendantPids(rootPid: number): Set<number> {
@@ -1238,7 +1251,7 @@ export class ExtensionServer {
         new Promise((resolve) => setTimeout(resolve, 5000)),
       ]).catch(() => {});
     }
-    this._killNativeBrowserChildren();
+    await this._killNativeBrowserChildren();
     if (this.mode === 'broker') {
       // Close all MCP client connections
       for (const ws of this.mcpClients.values()) {
@@ -1248,10 +1261,15 @@ export class ExtensionServer {
       this.mcpClients.clear();
       // Close extension
       this.extensionSocket?.close();
+      this.extensionSocket?.terminate();
       this.extensionSocket = null;
       const wss = this.wss;
       this.wss = null;
       if (wss) {
+        for (const ws of wss.clients) {
+          ws.close();
+          ws.terminate();
+        }
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, 2000);
           wss.close(() => {
