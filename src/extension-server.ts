@@ -301,6 +301,49 @@ export class ExtensionServer {
     setTimeout(() => this.extensionSocket?.removeListener('message', handler), 10_000);
   }
 
+  private async _sendExtensionSystemCommand(sessionId: string, type: string, tabId?: number): Promise<any> {
+    const socket = this.extensionSocket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      throw new Error('Extension not connected');
+    }
+    const id = `sys-${type}-${sessionId.slice(0, 8)}-${++this._counter}`;
+    return await new Promise((resolve, reject) => {
+      let handler: (data: any) => void;
+      const timer = setTimeout(() => {
+        socket.removeListener('message', handler);
+        reject(new Error(`Extension system command "${type}" timed out`));
+      }, 10_000);
+      handler = (data: any) => {
+        let msg: any;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
+        if (msg.id !== id) return;
+        clearTimeout(timer);
+        socket.removeListener('message', handler);
+        if (msg.error) reject(new Error(msg.error));
+        else resolve(msg.result ?? {});
+      };
+      socket.on('message', handler);
+      socket.send(JSON.stringify({ id, type, sessionId, tabId }));
+    });
+  }
+
+  private async _initSessionAsync(sessionId: string): Promise<number | undefined> {
+    const result = await this._sendExtensionSystemCommand(sessionId, 'session_init') as { tabId?: number };
+    if (typeof result.tabId === 'number') {
+      this.sessionTabs.set(sessionId, result.tabId);
+      console.error(`[pilot] Session ${sessionId.slice(0, 8)} → tab ${result.tabId}`);
+      const clientWs = this.mcpClients.get(sessionId);
+      if (clientWs?.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({
+          type: 'session_assigned',
+          sessionId,
+          tabId: result.tabId,
+        }));
+      }
+    }
+    return result.tabId;
+  }
+
   /** Ask extension to close tab for a session */
   private _closeSession(sessionId: string): void {
     const tabId = this.sessionTabs.get(sessionId);
@@ -406,6 +449,10 @@ export class ExtensionServer {
   }
 
   private _routeClientCommand(sessionId: string, msg: any): void {
+    if (msg.type === 'reset_session') {
+      this._handleResetSessionRequest(sessionId, msg);
+      return;
+    }
     if (this._shouldUseExtension()) {
       this._forwardToExtension(sessionId, msg);
       return;
@@ -419,6 +466,44 @@ export class ExtensionServer {
     if (clientWs?.readyState === WebSocket.OPEN) {
       clientWs.send(JSON.stringify({ id: msg.id, error: 'No Pilot browser backend connected' }));
     }
+  }
+
+  private async _handleResetSessionRequest(sessionId: string, msg: any): Promise<void> {
+    const clientWs = this.mcpClients.get(sessionId);
+    try {
+      const result = await this._resetSession(sessionId);
+      if (clientWs?.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ id: msg.id, sessionId, result }));
+      }
+    } catch (err) {
+      if (clientWs?.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({
+          id: msg.id,
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    }
+  }
+
+  private async _resetSession(sessionId: string): Promise<{ tabId?: number; backend: string }> {
+    if (this._shouldUseExtension()) {
+      const tabId = this.sessionTabs.get(sessionId);
+      if (tabId) {
+        await this._sendExtensionSystemCommand(sessionId, 'session_close', tabId).catch(() => {});
+      }
+      this.sessionTabs.delete(sessionId);
+      const newTabId = await this._initSessionAsync(sessionId);
+      return { tabId: newTabId, backend: 'extension' };
+    }
+
+    if (this._isNativeEnabled()) {
+      await this._closeNativeSession(sessionId);
+      const result = await this._initNativeSession(sessionId);
+      return { tabId: result.tabId, backend: 'native' };
+    }
+
+    throw new Error('No Pilot browser backend connected');
   }
 
   /** Forward command from MCP client to extension */
@@ -505,6 +590,8 @@ export class ExtensionServer {
       case 'session_close':
         await this._closeNativeSession(sessionId);
         return {};
+      case 'reset_session':
+        return await this._resetSession(sessionId);
       case 'tabs':
         return await this._nativeTabs(sessionId);
       case 'new_tab':
@@ -1192,6 +1279,10 @@ export class ExtensionServer {
       throw new Error('Pilot browser backend not connected');
     }
     const id = `${this.sessionId.slice(0, 8)}-${Date.now()}-${++this._counter}`;
+
+    if (type === 'reset_session' && this.mode === 'broker') {
+      return await this._resetSession(this.sessionId) as T;
+    }
 
     if (this.mode === 'broker' && this._shouldUseNative()) {
       return await this._handleNativeCommand(this.sessionId, type, payload ?? {}, overrideTabId) as T;

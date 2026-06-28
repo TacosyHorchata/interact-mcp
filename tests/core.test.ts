@@ -14,6 +14,8 @@ const TOOL_FILES = [
   'tabs.ts',
   'settings.ts',
   'iframe.ts',
+  'automation.ts',
+  'guide.ts',
 ];
 
 interface ToolDef {

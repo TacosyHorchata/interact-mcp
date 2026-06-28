@@ -9,9 +9,22 @@ import {
   listProfiles,
   listDomains,
 } from '../cookie-import.js';
+import { consoleBuffer, dialogBuffer, networkBuffer } from '../buffers.js';
+import { getEvidenceSession } from '../evidence.js';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
+  function pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function getExtensionStatusContent() {
     const { extensionServer } = await import('../extension-server.js');
     const connected = extensionServer.isConnected();
@@ -295,6 +308,129 @@ Returns: Connection status with mode, session id, assigned tab id when available
 Errors: None — returns installation/reconnect instructions when the extension is not connected.`,
     {},
     getExtensionStatusContent
+  );
+
+  server.tool(
+    'pilot_doctor',
+    `Diagnose Pilot MCP routing, broker ownership, browser health, buffers, refs, and evidence state without mutating the session.
+Use when an agent sees Transport closed, stale refs, missing extension connection, screenshot/readback failures, unexpected native fallback, or any browser automation behavior that smells like infrastructure instead of page logic.
+
+Parameters:
+- verbose: Include extra paths and buffer counts useful for debugging Pilot itself
+
+Returns: A compact health report with status, backend, broker owner, session tab, fallback browser health, ref count, recent error counts, active evidence bundle, and the next recommended reset command.
+
+Errors: None — doctor reports degraded states instead of throwing.`,
+    {
+      verbose: z.boolean().optional().describe('Include extra paths and buffer counts'),
+    },
+    async ({ verbose }) => {
+      try {
+        const { extensionServer } = await import('../extension-server.js');
+        const brokerInfo = extensionServer.getBrokerInfo();
+        const brokerAlive = brokerInfo ? pidAlive(brokerInfo.pid) : false;
+        const healthy = await bm.isHealthy();
+        const consoleTail = consoleBuffer.last(200);
+        const networkTail = networkBuffer.last(200);
+        const recentErrors = consoleTail.filter((entry) => entry.level === 'error' || entry.level === 'warning').length;
+        const failedRequests = networkTail.filter((entry) => typeof entry.status === 'number' && entry.status >= 400).length;
+        const evidence = getEvidenceSession();
+        const problems: string[] = [];
+
+        if (!extensionServer.isConnected()) problems.push('backend not connected');
+        if (brokerInfo && !brokerAlive) problems.push(`broker metadata points to dead pid ${brokerInfo.pid}`);
+        if (!extensionServer.isConnected() && !healthy) problems.push('fallback browser is not healthy');
+        if (recentErrors > 0) problems.push(`${recentErrors} recent console error/warning entries`);
+        if (failedRequests > 0) problems.push(`${failedRequests} recent HTTP 4xx/5xx entries`);
+
+        const lines = [
+          `Pilot doctor: ${problems.length === 0 ? 'ok' : 'warn'}`,
+          `Mode: ${extensionServer.getMode()} | Backend: ${extensionServer.getBackend()} | Connected: ${extensionServer.isConnected() ? 'yes' : 'no'}`,
+          `Session: ${extensionServer.getSessionId().slice(0, 8)} | Tab: ${extensionServer.getSessionTab() ?? 'none'} | Other sessions: ${extensionServer.getClientCount()}`,
+          brokerInfo
+            ? `Broker: pid ${brokerInfo.pid} (${brokerAlive ? 'alive' : 'dead'}) | session ${brokerInfo.sessionId.slice(0, 8)} | port ${brokerInfo.port}`
+            : 'Broker: none',
+          `Fallback browser healthy: ${healthy ? 'yes' : 'no'} | Refs: ${bm.getRefCount()}`,
+          `Recent console errors/warnings: ${recentErrors} | HTTP failures: ${failedRequests} | Dialogs: ${dialogBuffer.length}`,
+          evidence
+            ? `Evidence: ${evidence.id} (${evidence.steps.length} steps) -> ${evidence.outputDir}`
+            : 'Evidence: inactive',
+        ];
+
+        if (problems.length > 0) {
+          lines.push(`Problems: ${problems.join('; ')}`);
+          lines.push('Next: pilot_reset scope="session"; use scope="browser" for fallback Chromium; use scope="broker" only with confirm_broker=true.');
+        }
+
+        if (verbose) {
+          lines.push(`State dir: ${path.join(os.homedir(), '.pilot')}`);
+          lines.push(`Console buffer: ${consoleBuffer.length} | Network buffer: ${networkBuffer.length}`);
+        }
+
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Pilot doctor failed: ${wrapError(err)}` }] };
+      }
+    }
+  );
+
+  server.tool(
+    'pilot_reset',
+    `Reset the current Pilot session, fallback browser, or broker using the least destructive scope that can recover automation.
+Use when pilot_doctor reports stale session state, closed tabs, unhealthy fallback Chromium, dead broker metadata, or repeated browser actions fail after taking a fresh snapshot.
+
+Parameters:
+- scope: "session" resets the current tab/session; "browser" closes fallback Chromium; "broker" restarts this MCP's broker/client connection
+- confirm_broker: Required true for scope="broker" because it disconnects other sessions sharing this broker
+
+Returns: What was reset and the resulting backend/tab when available.
+
+Errors:
+- "confirm_broker=true required": Broker reset is intentionally guarded because it can disconnect other MCP clients.
+- Browser backend errors are returned with actionable reset guidance.`,
+    {
+      scope: z.enum(['session', 'browser', 'broker']).optional().describe('Reset scope (default session)'),
+      confirm_broker: z.boolean().optional().describe('Required true for broker reset'),
+    },
+    async ({ scope, confirm_broker }) => {
+      const resetScope = scope ?? 'session';
+      try {
+        if (resetScope === 'broker') {
+          if (!confirm_broker) {
+            return { content: [{ type: 'text' as const, text: 'confirm_broker=true required for scope="broker". This can disconnect other Pilot MCP sessions.' }], isError: true };
+          }
+          const { extensionServer } = await import('../extension-server.js');
+          await extensionServer.stop();
+          extensionServer.start();
+          return { content: [{ type: 'text' as const, text: 'Pilot broker/client restarted. Run pilot_doctor to confirm reconnection.' }] };
+        }
+
+        if (resetScope === 'browser') {
+          const ext = bm.getExtension();
+          if (ext) {
+            const result = await bm.extSend<{ tabId?: number; backend: string }>('reset_session');
+            if (typeof result.tabId === 'number') bm.setExtActiveTab(result.tabId);
+            return { content: [{ type: 'text' as const, text: `Pilot browser session reset (${result.backend})${result.tabId ? ` -> tab ${result.tabId}` : ''}` }] };
+          }
+          await bm.close();
+          return { content: [{ type: 'text' as const, text: 'Fallback Chromium closed. Next browser tool call will launch a fresh browser.' }] };
+        }
+
+        await bm.ensureBrowser();
+        const ext = bm.getExtension();
+        if (ext) {
+          const result = await bm.extSend<{ tabId?: number; backend: string }>('reset_session');
+          if (typeof result.tabId === 'number') bm.setExtActiveTab(result.tabId);
+          return { content: [{ type: 'text' as const, text: `Pilot session reset (${result.backend})${result.tabId ? ` -> tab ${result.tabId}` : ''}` }] };
+        }
+        await bm.clearSession();
+        bm.clearRefs();
+        bm.resetFailures();
+        return { content: [{ type: 'text' as const, text: 'Fallback session cleared (cookies, localStorage, sessionStorage, refs, failure count).' }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
+    }
   );
 
   server.tool(

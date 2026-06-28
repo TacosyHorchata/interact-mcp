@@ -10,6 +10,7 @@ import { registerTabTools } from './tabs.js';
 import { registerSettingsTools } from './settings.js';
 import { registerIframeTools } from './iframe.js';
 import { registerAutomationTools } from './automation.js';
+import { registerGuideTools } from './guide.js';
 
 export type ToolProfile = 'core' | 'standard' | 'full';
 
@@ -31,10 +32,12 @@ const CORE_TOOLS = new Set([
 ]);
 
 /**
- * standard (30 tools) — common automation needs without inspection overhead.
+ * standard (40 tools) — common automation needs plus agent-friendly recovery/proof.
  */
 const STANDARD_TOOLS = new Set([
   ...CORE_TOOLS,
+  // agent-friendly high-level tools
+  'pilot_act', 'pilot_guide', 'pilot_evidence_start', 'pilot_evidence_step', 'pilot_evidence_export',
   // navigation
   'pilot_back', 'pilot_forward', 'pilot_reload', 'pilot_get',
   // interaction
@@ -46,7 +49,7 @@ const STANDARD_TOOLS = new Set([
   // visual
   'pilot_annotated_screenshot',
   // diagnostics
-  'pilot_console', 'pilot_extension_status', 'pilot_status',
+  'pilot_console', 'pilot_extension_status', 'pilot_status', 'pilot_doctor', 'pilot_reset',
   // iframe
   'pilot_frames', 'pilot_frame_select', 'pilot_frame_reset',
   // session + config
@@ -86,4 +89,5 @@ export function registerAllTools(server: McpServer, bm: BrowserManager, profile:
   registerSettingsTools(effectiveServer, bm);
   registerIframeTools(effectiveServer, bm);
   registerAutomationTools(effectiveServer, bm);
+  registerGuideTools(effectiveServer, bm);
 }

@@ -90,20 +90,20 @@ Less context = faster responses, cheaper API calls, fewer hallucinations.
 | **Snapshot diff** | `pilot_snapshot_diff` | ❌ |
 | **Cookie import** | Chrome, Arc, Brave, Edge, Comet | Manual JSON |
 | **Iframes** | ✅ | ❌ |
-| **Tool profiles** | `core` (9) / `standard` (30) / `full` (61) | `--caps` groups |
+| **Tool profiles** | `core` (9) / `standard` (40) / `full` (69) | `--caps` groups |
 | **Transport** | stdio | stdio, HTTP, SSE |
 
 ---
 
-## 61 tools across 3 profiles
+## 69 tools across 3 profiles
 
-Most LLMs degrade past ~30 tools. Load only what you need:
+LLMs degrade as tool lists grow. Load only what you need:
 
 | Profile | Tools | What's included |
 |---|---|---|
 | `core` | 9 | navigate, snapshot, click, fill, type, press_key, wait, screenshot, snapshot_diff |
-| `standard` | 30 | Core + tabs, scroll, hover, drag, iframes, forms, links, auth, block, find, element_state |
-| `full` | 61 | Standard + network intercept, assertions, clipboard, geolocation, CDP, evaluate, PDF, responsive |
+| `standard` | 40 | Core + pilot_act, pilot_guide, evidence, doctor/reset, tabs, scroll, hover, drag, iframes, auth, block, find |
+| `full` | 69 | Standard + network intercept, assertions, clipboard, geolocation, CDP, evaluate, PDF, responsive, deep inspection |
 
 ```json
 {
