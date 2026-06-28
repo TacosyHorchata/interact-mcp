@@ -18,6 +18,7 @@ const baseUrl = String(args.url || DEFAULT_URL);
 const mode = String(args.mode || 'both');
 const outDir = path.resolve(String(args.outDir || os.tmpdir()));
 const shouldStartBroker = Boolean(args.startBroker);
+const requireOwnedBroker = Boolean(args.requireOwnedBroker);
 const shouldLaunchChrome = Boolean(args.launchChrome);
 const chromeProfile = path.resolve(String(args.chromeProfile || path.join(os.tmpdir(), 'pilot-chrome-stress-profile')));
 const launchSettleMs = Number(args.launchSettleMs || 5000);
@@ -247,15 +248,15 @@ function delay(ms) {
 
 fs.mkdirSync(outDir, { recursive: true });
 
-const broker = shouldStartBroker ? await startBroker() : null;
+const brokerHandle = shouldStartBroker ? await startBroker() : null;
 const chrome = shouldLaunchChrome ? launchChrome() : null;
 
 try {
   if (chrome) {
     await delay(launchSettleMs);
   }
-  if (broker) {
-    await waitFor(() => broker.isConnected(), TIMEOUT_MS);
+  if (brokerHandle) {
+    await waitFor(() => brokerHandle.server.isConnected(), TIMEOUT_MS);
   }
   const modes = mode === 'both' ? ['direct', 'client'] : [mode];
   for (const selectedMode of modes) {
@@ -265,7 +266,7 @@ try {
     await runMode(selectedMode);
   }
 } finally {
-  if (broker) await broker.stop();
+  if (brokerHandle) await brokerHandle.server.stop();
   if (chrome) {
     try { chrome.kill(); } catch {}
   }
@@ -276,9 +277,28 @@ async function startBroker() {
   const { ExtensionServer } = await import('../dist/extension-server.js');
   const broker = new ExtensionServer();
   broker.start();
-  await waitFor(() => broker.getMode() === 'broker', TIMEOUT_MS);
-  console.error(`[pilot-stress] broker started session=${broker.getSessionId().slice(0, 8)}`);
-  return broker;
+  await waitFor(() => broker.getMode() === 'broker' || broker.getMode() === 'client', TIMEOUT_MS);
+  if (broker.getMode() === 'broker') {
+    console.error(`[pilot-stress] broker started session=${broker.getSessionId().slice(0, 8)}`);
+    return { server: broker, owned: true };
+  }
+  if (requireOwnedBroker) {
+    const info = broker.getBrokerInfo?.();
+    await broker.stop();
+    throw new Error(
+      `Port ${PORT} is already owned by another Pilot broker` +
+      (info ? ` (pid=${info.pid}, session=${String(info.sessionId).slice(0, 8)}, backend=${info.backend})` : '') +
+      '. Stop it or omit --require-owned-broker to reuse it.',
+    );
+  }
+  await waitFor(() => broker.isConnected() && typeof broker.getSessionTab() === 'number', TIMEOUT_MS);
+  const info = broker.getBrokerInfo?.();
+  console.error(
+    `[pilot-stress] reusing existing broker` +
+    (info ? ` pid=${info.pid} session=${String(info.sessionId).slice(0, 8)} backend=${info.backend}` : '') +
+    ` via client session=${broker.getSessionId().slice(0, 8)}`,
+  );
+  return { server: broker, owned: false };
 }
 
 function launchChrome() {

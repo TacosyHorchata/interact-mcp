@@ -34,6 +34,7 @@ const SCREENSHOT_MIN_INTERVAL = 1000;
 const BROWSER_MODE = (process.env.PILOT_BROWSER_MODE || 'native').toLowerCase();
 const TOKEN_DIR = path.join(os.homedir(), '.pilot');
 const TOKEN_FILE = path.join(TOKEN_DIR, 'broker-token');
+const BROKER_INFO_FILE = path.join(TOKEN_DIR, `broker-${PORT}.json`);
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -55,12 +56,46 @@ type NativeSession = {
   refMap: Map<string, NativeRef>;
 };
 
+type BrokerInfo = {
+  pid: number;
+  port: number;
+  sessionId: string;
+  backend: string;
+  startedAt: string;
+};
+
 const INTERACTIVE_ROLES = new Set([
   'button', 'link', 'textbox', 'checkbox', 'radio', 'combobox',
   'listbox', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
   'option', 'searchbox', 'slider', 'spinbutton', 'switch', 'tab',
   'treeitem',
 ]);
+
+export function formatNativeActionErrorMessage(
+  action: string,
+  ref: unknown,
+  error: unknown,
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const hints: string[] = [];
+
+  if (/strict mode violation/i.test(message)) {
+    hints.push('selector matched multiple elements; run pilot_snapshot or pilot_find and use a unique @ref');
+  }
+  if (/outside of the viewport|not visible|element is not visible/i.test(message)) {
+    hints.push('element is not interactable in the viewport; run pilot_scroll or target a visible @ref');
+  }
+  if (/Timeout \d+ms exceeded|timed out/i.test(message)) {
+    hints.push('page or selector was not ready; run pilot_snapshot to verify current state before retrying');
+  }
+  if (/waiting for locator/i.test(message)) {
+    hints.push('selector did not resolve to an actionable element; prefer snapshot refs over broad CSS/text selectors');
+  }
+
+  const target = ref === undefined || ref === null || ref === '' ? '' : ` ${String(ref)}`;
+  const suffix = hints.length > 0 ? ` Hint: ${[...new Set(hints)].join('; ')}.` : '';
+  return `pilot_${action}${target} failed: ${message}${suffix}`;
+}
 
 export class ExtensionServer {
   // Identity
@@ -113,6 +148,7 @@ export class ExtensionServer {
       try {
         fs.mkdirSync(TOKEN_DIR, { recursive: true });
         fs.writeFileSync(TOKEN_FILE, this._brokerToken, { mode: 0o600 });
+        fs.writeFileSync(BROKER_INFO_FILE, JSON.stringify(this._brokerInfo(), null, 2), { mode: 0o600 });
       } catch {}
       this._startHeartbeat();
       console.error(`[pilot] Broker mode — listening on ws://127.0.0.1:${PORT} (session ${this.sessionId.slice(0, 8)})`);
@@ -120,7 +156,7 @@ export class ExtensionServer {
 
     wss.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
-        console.error(`[pilot] Port ${PORT} taken — connecting as client`);
+        console.error(`[pilot] Port ${PORT} taken — connecting as client${this._brokerOwnerSummary()}`);
         this._connectAsClient();
       } else {
         console.error(`[pilot] WS server error: ${err.message}`);
@@ -582,13 +618,33 @@ export class ExtensionServer {
   }
 
   private _killNativeBrowserChildren(): void {
+    const pids = new Set<number>();
     for (const pid of this.nativeBrowserPids) {
-      try { process.kill(pid, 'SIGTERM'); } catch {}
+      pids.add(pid);
+      for (const child of this._descendantPids(pid)) pids.add(child);
     }
-    for (const pid of this.nativeBrowserPids) {
-      try { process.kill(pid, 'SIGKILL'); } catch {}
-    }
+    const ordered = [...pids].sort((a, b) => b - a);
+    for (const pid of ordered) try { process.kill(pid, 'SIGTERM'); } catch {}
+    for (const pid of ordered) try { process.kill(pid, 'SIGKILL'); } catch {}
     this.nativeBrowserPids.clear();
+  }
+
+  private _descendantPids(rootPid: number): Set<number> {
+    const found = new Set<number>();
+    const visit = (pid: number) => {
+      if (process.platform === 'win32') return;
+      let out = '';
+      try { out = execSync(`pgrep -P ${pid}`, { encoding: 'utf8' }).trim(); } catch { return; }
+      if (!out) return;
+      for (const raw of out.split(/\s+/)) {
+        const childPid = Number(raw);
+        if (!Number.isFinite(childPid) || found.has(childPid)) continue;
+        found.add(childPid);
+        visit(childPid);
+      }
+    };
+    visit(rootPid);
+    return found;
   }
 
   private async _initNativeSession(sessionId: string): Promise<{ tabId: number }> {
@@ -825,18 +881,26 @@ export class ExtensionServer {
 
   private async _nativeClick(sessionId: string, payload: Record<string, any>, tabId?: number): Promise<Record<string, never>> {
     const locator = await this._nativeResolve(sessionId, String(payload.ref), tabId);
-    await locator.click({
-      timeout: 5000,
-      ...(payload.button ? { button: payload.button } : {}),
-      ...(payload.double_click ? { clickCount: 2 } : {}),
-    });
+    try {
+      await locator.click({
+        timeout: 5000,
+        ...(payload.button ? { button: payload.button } : {}),
+        ...(payload.double_click ? { clickCount: 2 } : {}),
+      });
+    } catch (err) {
+      throw new Error(formatNativeActionErrorMessage('click', payload.ref, err));
+    }
     await (await this._nativePage(sessionId, tabId)).waitForLoadState('domcontentloaded').catch(() => {});
     return {};
   }
 
   private async _nativeFill(sessionId: string, payload: Record<string, any>, tabId?: number): Promise<Record<string, never>> {
     const locator = await this._nativeResolve(sessionId, String(payload.ref), tabId);
-    await locator.fill(String(payload.value ?? ''), { timeout: 5000 });
+    try {
+      await locator.fill(String(payload.value ?? ''), { timeout: 5000 });
+    } catch (err) {
+      throw new Error(formatNativeActionErrorMessage('fill', payload.ref, err));
+    }
     return {};
   }
 
@@ -898,7 +962,11 @@ export class ExtensionServer {
   private async _nativeSelectOption(sessionId: string, payload: Record<string, any>, tabId?: number): Promise<{ selected: string; value: string }> {
     const locator = await this._nativeResolve(sessionId, String(payload.ref), tabId);
     const value = String(payload.value ?? payload.label ?? '');
-    await locator.selectOption(value, { timeout: 5000 });
+    try {
+      await locator.selectOption(value, { timeout: 5000 });
+    } catch (err) {
+      throw new Error(formatNativeActionErrorMessage('select_option', payload.ref, err));
+    }
     return { selected: value, value };
   }
 
@@ -1017,6 +1085,8 @@ export class ExtensionServer {
       if (this.stopped) return;
       this.brokerSocket = null;
       this.extensionReady = false;
+      this.clientAssignedTabId = undefined;
+      this._rejectPending('Pilot broker connection closed');
       this._checkState();
       this.reconnectTimer = setTimeout(() => this._connectAsClient(), RECONNECT_DELAY);
     });
@@ -1025,6 +1095,8 @@ export class ExtensionServer {
       if (this.stopped) return;
       this.brokerSocket = null;
       this.extensionReady = false;
+      this.clientAssignedTabId = undefined;
+      this._rejectPending('Pilot broker connection errored');
       // Broker might have died — try to become broker
       this.mode = null;
       setTimeout(() => this._tryBroker(), RECONNECT_DELAY);
@@ -1049,6 +1121,40 @@ export class ExtensionServer {
         console.error('[pilot] Browser backend disconnected');
       }
       this._onStateChange?.(now);
+    }
+  }
+
+  private _rejectPending(message: string): void {
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(message));
+    }
+    this.pending.clear();
+  }
+
+  private _brokerInfo(): BrokerInfo {
+    return {
+      pid: process.pid,
+      port: PORT,
+      sessionId: this.sessionId,
+      backend: this.getBackend(),
+      startedAt: new Date().toISOString(),
+    };
+  }
+
+  private _brokerOwnerSummary(): string {
+    const info = this.getBrokerInfo();
+    if (!info) return '';
+    const alive = this._pidAlive(info.pid) ? 'alive' : 'dead';
+    return ` (owner pid=${info.pid} ${alive}, session=${info.sessionId.slice(0, 8)}, backend=${info.backend})`;
+  }
+
+  private _pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -1156,6 +1262,10 @@ export class ExtensionServer {
       }
       // Clean up token file
       try { fs.unlinkSync(TOKEN_FILE); } catch {}
+      try {
+        const info = this.getBrokerInfo();
+        if (!info || info.pid === process.pid) fs.unlinkSync(BROKER_INFO_FILE);
+      } catch {}
     } else if (this.mode === 'client') {
       this.brokerSocket?.close();
       this.brokerSocket?.terminate();
@@ -1185,6 +1295,13 @@ export class ExtensionServer {
       : this.sessionTabs.get(this.sessionId);
   }
   getClientCount(): number { return this.mcpClients.size; }
+  getBrokerInfo(): BrokerInfo | null {
+    try {
+      return JSON.parse(fs.readFileSync(BROKER_INFO_FILE, 'utf8')) as BrokerInfo;
+    } catch {
+      return null;
+    }
+  }
 }
 
 // Singleton

@@ -96,6 +96,8 @@ Expected summary:
 [pilot-stress] cleanup complete
 ```
 
+If port `3131` is already owned by another Pilot broker, the screenshot stress runner reuses it as a broker client and logs the owner PID/session from `~/.pilot/broker-3131.json`. Add `-- --require-owned-broker` when a run must prove it owns a fresh broker instead of reusing an existing one.
+
 Run real Codex MCP stress:
 
 ```bash

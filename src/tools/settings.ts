@@ -20,9 +20,13 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
     const session = extensionServer.getSessionId().slice(0, 8);
     const tab = extensionServer.getSessionTab();
     const clients = extensionServer.getClientCount();
+    const brokerInfo = extensionServer.getBrokerInfo();
+    const brokerText = brokerInfo
+      ? ` | Broker PID: ${brokerInfo.pid}`
+      : '';
 
     if (connected) {
-      let status = `Pilot browser backend ready ✓\nMode: ${mode} | Backend: ${backend} | Session: ${session}`;
+      let status = `Pilot browser backend ready ✓\nMode: ${mode} | Backend: ${backend} | Session: ${session}${brokerText}`;
       if (tab) status += ` | Tab: ${tab}`;
       if (mode === 'broker' && clients > 0) status += ` | Other sessions: ${clients}`;
       return { content: [{ type: 'text' as const, text: status }] };
@@ -34,7 +38,7 @@ export function registerSettingsTools(server: McpServer, bm: BrowserManager) {
     const activeText = activeTab
       ? ` | Active fallback tab: ${activeTab.id} (${activeTab.url})`
       : '';
-    return { content: [{ type: 'text' as const, text: `Pilot browser backend not connected (mode: ${mode}, backend: ${backend}, session: ${session})${activeText}.\nFallback: headed Chromium context owned by this MCP process.` }] };
+    return { content: [{ type: 'text' as const, text: `Pilot browser backend not connected (mode: ${mode}, backend: ${backend}, session: ${session}${brokerText})${activeText}.\nFallback: headed Chromium context owned by this MCP process.` }] };
   }
 
   server.tool(
